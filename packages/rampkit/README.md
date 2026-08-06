@@ -40,7 +40,7 @@ With a sandbox API key in hand ([sandbox.etherfuse.com](https://sandbox.etherfus
 create account → Approve KYB → API key):
 
 ```bash
-export ETHERFUSE_API_KEY=api_sand_...        # PowerShell: $env:ETHERFUSE_API_KEY="..."
+export ETHERFUSE_API_KEY="api_sand:..."      # PowerShell: $env:ETHERFUSE_API_KEY="..."
 npx @spacecathy/rampkit setup-sandbox you@email.com
 ```
 
@@ -68,7 +68,7 @@ npm install @spacecathy/rampkit
 import { EtherfuseClient, createRampHandler } from '@spacecathy/rampkit/server';
 
 const client = new EtherfuseClient({
-    apiKey: process.env.ETHERFUSE_API_KEY!, // api_sand_… or api_prod_…
+    apiKey: process.env.ETHERFUSE_API_KEY!, // api_sand:… or api_prod:…
     // environment, baseUrl, horizonUrl are inferred from the key prefix
 });
 
@@ -191,12 +191,14 @@ const { isApproved, kyc, launch } = useKyc();
 legacy presigned flow is kept as `createHostedOnboarding()` — no issuer
 registration needed, with the documented "see org" 409 recovery built in —
 but it is `@deprecated`: Etherfuse sunsets that endpoint on **2026-08-16**.
-For tests, `sandboxApproveKyc()` (sandbox-only) approves a customer without
-a browser — read the status it RETURNS (straight from the submit response;
-an immediate GET can lag), and it's safe to re-run on an already-approved
-customer to retry just the agreements. Wallet-scoped status
-(`getWalletKycStatus()`) is also available, with its own enum (`proposed`,
-`approved_chain_deploying`, `rejected`).
+There is no fully-programmatic KYC approval — not even in sandbox:
+Etherfuse removed the old `/ramp/agreements/*` endpoints (410) and email
+confirmation, the liveness selfie, and the customer agreement have no API;
+the customer completes them once inside `/idv` (sandbox auto-approves with
+fake data). Use `submitVerificationData()` (the documented KYC API) to push
+identity data first so that click-through only asks for what's left.
+Wallet-scoped status (`getWalletKycStatus()`) is also available, with its
+own enum (`proposed`, `approved_chain_deploying`, `rejected`).
 
 **One-time platform setup** (per environment, required for `launch`):
 Etherfuse verifies a JWT your server signs, against a JWKS you host.

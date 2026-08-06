@@ -13,7 +13,15 @@ import { Keypair, TransactionBuilder } from '@stellar/stellar-sdk';
 function makeDemoSigner(): RampSigner | null {
     const secret = process.env.NEXT_PUBLIC_DEMO_WALLET_SECRET;
     if (!secret) return null;
-    const keypair = Keypair.fromSecret(secret);
+    let keypair: Keypair;
+    try {
+        keypair = Keypair.fromSecret(secret);
+    } catch {
+        // Placeholder or malformed secret (e.g. the example file's "S...").
+        // Render as "signer: not configured" instead of a 500 — run
+        // scripts/bootstrap-sandbox.mjs to fill in real values.
+        return null;
+    }
     return {
         address: keypair.publicKey(),
         async signTransaction({ xdr, networkPassphrase }) {

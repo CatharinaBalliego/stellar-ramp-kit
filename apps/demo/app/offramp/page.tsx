@@ -4,20 +4,24 @@ import { useState } from 'react';
 import { useOfframp, useRampAssets } from '@spacecathy/rampkit/react';
 import { BankAccountPicker, ErrorLine, Phase, Section } from '../ui';
 
+const FIAT = 'BRL';
+
 export default function OfframpPage() {
-    const { assets } = useRampAssets({ currency: 'MXN' });
+    // Assets are discovered at runtime — never hardcoded.
+    const { assets } = useRampAssets({ currency: FIAT });
     const { phase, quote, order, burnXdr, preflightIssues, txHash, error, actions } =
         useOfframp();
-    const [asset, setAsset] = useState('CETES');
+    const [asset, setAsset] = useState('');
     const [amount, setAmount] = useState('1');
     const [bankAccountId, setBankAccountId] = useState('');
     const [resumeId, setResumeId] = useState('');
 
+    const selectedAsset = asset || assets[0]?.symbol || '';
     const busy = phase === 'quoting' || phase === 'creating_order';
 
     return (
         <main>
-            <h2>Offramp — tokens → MXN</h2>
+            <h2>Offramp — tokens → {FIAT}</h2>
             <Phase phase={phase} />
             <ErrorLine error={error} />
 
@@ -45,14 +49,13 @@ export default function OfframpPage() {
             )}
 
             <Section title="1 · Quote">
-                <select value={asset} onChange={(e) => setAsset(e.target.value)}>
-                    {(assets.length ? assets : [{ symbol: 'CETES', identifier: 'CETES' }]).map(
-                        (a) => (
-                            <option key={a.identifier} value={a.symbol}>
-                                {a.symbol}
-                            </option>
-                        ),
-                    )}
+                <select value={selectedAsset} onChange={(e) => setAsset(e.target.value)}>
+                    {assets.length === 0 && <option value="">loading assets…</option>}
+                    {assets.map((a) => (
+                        <option key={a.identifier} value={a.symbol}>
+                            {a.symbol}
+                        </option>
+                    ))}
                 </select>{' '}
                 <input
                     value={amount}
@@ -61,15 +64,17 @@ export default function OfframpPage() {
                 />{' '}
                 tokens{' '}
                 <button
-                    disabled={busy}
-                    onClick={() => void actions.requestQuote({ asset, fiat: 'MXN', amount })}
+                    disabled={busy || !selectedAsset}
+                    onClick={() =>
+                        void actions.requestQuote({ asset: selectedAsset, fiat: FIAT, amount })
+                    }
                 >
                     Get quote
                 </button>
                 {quote && (
                     <p>
-                        {quote.sourceAmount} {asset} → <b>{quote.destinationAmount}</b> MXN @{' '}
-                        {quote.exchangeRate}
+                        {quote.sourceAmount} {selectedAsset} → <b>{quote.destinationAmount}</b>{' '}
+                        {FIAT} @ {quote.exchangeRate}
                         {phase === 'quote_expired' ? (
                             <>
                                 {' '}

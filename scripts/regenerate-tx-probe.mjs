@@ -11,7 +11,7 @@
  * env file needed. An optional .env.sandbox in the repo root overrides it.
  *
  * Used keys (demo names in parentheses):
- *   ETHERFUSE_API_KEY                            required, api_sand_...
+ *   ETHERFUSE_API_KEY                            required, api_sand:...
  *   CUSTOMER_ID     (DEMO_CUSTOMER_ID)           approved personal org
  *   STELLAR_SECRET  (NEXT_PUBLIC_DEMO_WALLET_SECRET)  testnet key w/ CETES
  *   BANK_ACCOUNT_ID                              optional; otherwise reuses
@@ -37,6 +37,7 @@ function parseEnvFile(path) {
     if (!existsSync(path)) return {};
     return Object.fromEntries(
         readFileSync(path, 'utf8')
+            .replace(/^﻿/, '') // Notepad saves UTF-8 with a BOM
             .split('\n')
             .filter((l) => l.trim() && !l.trim().startsWith('#'))
             .map((l) => {
@@ -56,7 +57,7 @@ if (!API_KEY) {
     console.error('Missing ETHERFUSE_API_KEY. Fill in apps/demo/.env.local (see .env.local.example).');
     process.exit(1);
 }
-if (!API_KEY.startsWith('api_sand_')) {
+if (!API_KEY.startsWith('api_sand')) {
     console.error(`Refusing to run: key is not a sandbox key (${API_KEY.slice(0, 9)}...).`);
     process.exit(1);
 }

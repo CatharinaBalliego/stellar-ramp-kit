@@ -1,24 +1,29 @@
 /**
  * Sandbox bootstrap — creates everything the demo's .env.local needs:
- * a customer, a Stellar testnet wallet (funded via friendbot), and the
- * hosted-onboarding link where you click through KYC + bank account.
- * On approval it WRITES apps/demo/.env.local for you.
+ * a customer, a funded Stellar testnet wallet, and ONE hosted-onboarding
+ * link where you click through the remaining KYC steps. On approval it
+ * WRITES apps/demo/.env.local for you.
  *
  *   node scripts/bootstrap-sandbox.mjs you@email.com
  *
- * Prerequisite: ETHERFUSE_API_KEY (api_sand_…) already in
- * apps/demo/.env.local (copy .env.local.example) or .env.sandbox.
+ * Why a browser step at all? Etherfuse removed the programmatic agreement
+ * endpoints (410) and documents that email confirmation, the liveness
+ * selfie, and the customer agreement have NO API — the customer completes
+ * them in /idv, even in sandbox (where checks don't run and fake data
+ * auto-approves): https://docs.etherfuse.com/guides/kyc-api
+ * The script pre-pushes identity data over the KYC API so the click-through
+ * only asks for what's left.
  *
- * NOTE: uses POST /ramp/onboarding-url, deprecated with sunset 2026-08-16 —
- * fine as a dev-only convenience until then. The published package never
- * touches it. After the sunset, create customers via the Etherfuse
- * dashboard or the JWT /idv flow instead.
+ * Prerequisite: ETHERFUSE_API_KEY (api_sand:…) already in
+ * apps/demo/.env.local (copy .env.local.example) or .env.sandbox.
+ * Run from the repo ROOT.
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline/promises';
 import { Keypair } from '@stellar/stellar-sdk';
+import { EtherfuseClient } from '@spacecathy/rampkit/server';
 
 const ENV_PATH = 'apps/demo/.env.local';
 const BASE = 'https://api.sand.etherfuse.com';
@@ -27,6 +32,7 @@ function parseEnvFile(path) {
     if (!existsSync(path)) return {};
     return Object.fromEntries(
         readFileSync(path, 'utf8')
+            .replace(/^﻿/, '') // Notepad saves UTF-8 with a BOM
             .split('\n')
             .filter((l) => l.trim() && !l.trim().startsWith('#'))
             .map((l) => {
@@ -40,8 +46,23 @@ const env = { ...parseEnvFile(ENV_PATH), ...parseEnvFile('.env.sandbox') };
 const API_KEY = env.ETHERFUSE_API_KEY || process.env.ETHERFUSE_API_KEY;
 const EMAIL = process.argv[2];
 
-if (!API_KEY || !API_KEY.startsWith('api_sand_')) {
-    console.error(`Missing sandbox key. Put ETHERFUSE_API_KEY=api_sand_... in ${ENV_PATH}`);
+if (!API_KEY) {
+    console.error(
+        `ETHERFUSE_API_KEY not found.\n` +
+            `  Looked in: ${ENV_PATH} (${existsSync(ENV_PATH) ? 'exists' : 'MISSING'}), ` +
+            `.env.sandbox (${existsSync('.env.sandbox') ? 'exists' : 'missing'}), ` +
+            `and the process env.\n` +
+            `  Run from the repo ROOT (paths are relative to it) and check the exact\n` +
+            `  variable name: ETHERFUSE_API_KEY=api_sand:...`,
+    );
+    process.exit(1);
+}
+if (!API_KEY.startsWith('api_sand')) {
+    console.error(
+        `The key found starts with "${API_KEY.slice(0, 9)}..." — expected the api_sand prefix.\n` +
+            `  This script is sandbox-only (never use a production key here).\n` +
+            `  Sandbox keys come from https://sandbox.etherfuse.com (API base api.sand.etherfuse.com).`,
+    );
     process.exit(1);
 }
 if (!EMAIL || !EMAIL.includes('@')) {
@@ -51,6 +72,7 @@ if (!EMAIL || !EMAIL.includes('@')) {
 }
 
 const log = (...a) => console.log('•', ...a);
+const client = new EtherfuseClient({ apiKey: API_KEY });
 
 async function api(method, path, body) {
     const res = await fetch(`${BASE}${path}`, {
@@ -67,7 +89,8 @@ async function api(method, path, body) {
 const keypair = Keypair.random();
 log(`Wallet: ${keypair.publicKey()}`);
 log('Funding via friendbot…');
-await fetch(`https://friendbot.stellar.org?addr=${keypair.publicKey()}`);
+const fb = await fetch(`https://friendbot.stellar.org?addr=${keypair.publicKey()}`);
+if (!fb.ok) log(`friendbot returned ${fb.status} (ok if the account already exists)`);
 
 // 2 · Customer + hosted onboarding link (KYC + bank account in one flow)
 const customerId = randomUUID();
@@ -81,36 +104,66 @@ const { presigned_url } = await api('POST', '/ramp/onboarding-url', {
     userInfo: { email: EMAIL, displayName: EMAIL.split('@')[0] },
 });
 
+// 3 · Pre-push identity data over the KYC API so /idv asks for less.
+//     Best-effort: the hosted flow collects anything this misses.
+try {
+    await client.submitVerificationData(customerId, {
+        firstName: 'Sandbox',
+        lastName: 'Tester',
+        dateOfBirth: '1990-01-01',
+        country: 'BRA',
+        taxId: '52998224725', // fake but checksum-valid CPF
+        address: {
+            street: 'Av. Paulista 1000',
+            city: 'Sao Paulo',
+            region: 'SP',
+            postalCode: '01310-100',
+            country: 'BRA',
+        },
+    });
+    log('Identity data pre-pushed via the KYC API (less to type in the browser)');
+} catch (error) {
+    log(`Identity pre-push skipped (${error.message}) — the hosted flow will collect it`);
+}
+
 console.log(`
 ================================================================================
-ABRA ESTE LINK e complete o onboarding (vale por 15 minutos):
+OPEN THIS LINK and complete the remaining steps (valid for 15 minutes):
 
 ${presigned_url}
 
-Sandbox aceita dados falsos e auto-aprova. Detalhes:
-- México pede a Constancia de Situación Fiscal — use o exemplo da Etherfuse:
+Sandbox accepts fake data and auto-approves — identity checks don't run.
+What remains is only what has no API: email confirmation, the liveness
+selfie, and the customer agreement. Details:
+- Mexico asks for the Constancia de Situación Fiscal — use the Etherfuse example:
   https://stablebonds.s3.us-west-2.amazonaws.com/example-constancia-de-situacion-fiscal.pdf
-- A conta bancária registrada pelo fluxo hosted fica ativa na hora.
+- The bank account registered by the hosted flow becomes active immediately.
 ================================================================================
 `);
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
-await rl.question('Terminou o fluxo no browser? [enter] ');
+await rl.question('Done with the browser flow? [enter] ');
 rl.close();
 
-// 3 · Confirm approval
-const kyc = await api('GET', `/ramp/customer/${customerId}/kyc`);
-log(`KYC status: ${kyc?.status}`);
-if (kyc?.status !== 'approved') {
+// 4 · Confirm approval (poll briefly — approval can lag a little)
+let status = 'unknown';
+for (let i = 0; i < 24; i++) {
+    status = (await client.getCustomerKyc(customerId)).status;
+    if (status === 'approved') break;
+    log(`KYC: ${status} — waiting…`);
+    await new Promise((r) => setTimeout(r, 5000));
+}
+if (status !== 'approved') {
     console.error(
-        `Ainda "${kyc?.status}". Termine o fluxo e rode de novo com:\n` +
-            `  CUSTOMER_ID=${customerId} (já criado — não repita o link)\n` +
-            'ou aguarde um instante e reexecute o script.',
+        `KYC ended as "${status}". Finish the flow and run the script again\n` +
+            `(customer ${customerId} already exists — the link is single-use, but a\n` +
+            `re-run creates a fresh one).`,
     );
     process.exit(1);
 }
+log('KYC approved ✓');
 
-// 4 · Write .env.local (preserving the API key line)
+// 5 · Write .env.local
 const lines = [
     `ETHERFUSE_API_KEY="${API_KEY}"`,
     '',
@@ -122,11 +175,12 @@ const lines = [
     '',
 ];
 writeFileSync(ENV_PATH, lines.join('\n'));
-log(`Gravado ${ENV_PATH}`);
+log(`Wrote ${ENV_PATH}`);
 
 console.log(`
-Pronto. Agora:
+Done. Now:
   npm run dev -w apps/demo    → http://localhost:3000
-Onramp primeiro (≤500 MXN, "Simulate deposit", depois "Sign claim") para a
-carteira ganhar CETES + trustline; só então o offramp tem o que vender.
+Run an onramp first ("Simulate deposit", then "Sign claim") so the wallet
+holds the stablebond + trustline; only then does the offramp have anything
+to sell.
 `);

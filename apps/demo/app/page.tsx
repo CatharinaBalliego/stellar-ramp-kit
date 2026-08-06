@@ -45,8 +45,8 @@ export default function Home() {
                 </li>
             </ul>
             <p>
-                Try the <a href="/onramp">onramp</a> (MXN → CETES) or the{' '}
-                <a href="/offramp">offramp</a> (CETES → MXN).
+                Try the <a href="/onramp">onramp</a> (BRL → stablebond, paid via PIX) or
+                the <a href="/offramp">offramp</a> (stablebond → BRL).
             </p>
         </main>
     );

@@ -2,7 +2,6 @@ import { createVerify, generateKeyPairSync } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { EtherfuseClient } from '../src/server/client';
 import { createJwks, createJwksHandler, signUserJwt } from '../src/server/onboarding';
-import { RampkitError } from '../src/core/errors';
 import { mockFetch, type Route } from './helpers';
 
 const sandboxClient = (routes: Route[]) =>
@@ -384,90 +383,52 @@ describe('createHostedOnboarding (deprecated presigned flow)', () => {
     });
 });
 
-describe('sandboxApproveKyc', () => {
-    it('submits identity then accepts the 3 agreements, each with a FRESH presigned URL', async () => {
-        let presignedCount = 0;
-        const kycRoute: Route = {
+describe('submitVerificationData (KYC API step 1)', () => {
+    it('POSTs the identity payload and returns the 202 receipt', async () => {
+        const route: Route = {
             method: 'POST',
-            path: '/ramp/customer/c-1/kyc',
-            respond: { status: 200, body: { status: 'approved' } },
-        };
-        const onboardingRoute: Route = {
-            method: 'POST',
-            path: '/ramp/onboarding-url',
-            respond: () => {
-                presignedCount += 1;
-                return { status: 200, body: { presigned_url: `https://p/${presignedCount}` } };
+            path: '/ramp/customer/c-1/verification',
+            respond: {
+                status: 202,
+                body: { customerId: 'c-1', status: 'not_started' },
             },
         };
-        const agreements: Route = {
-            method: 'POST',
-            path: (p) => p.startsWith('/ramp/agreements/'),
-            respond: { status: 200, body: { success: true } },
-        };
-        const client = sandboxClient([kycRoute, onboardingRoute, agreements]);
-
-        const result = await client.sandboxApproveKyc({ customerId: 'c-1', publicKey: 'GANA' });
-
-        // The submit response is authoritative — an immediate GET can lag.
-        expect(result).toEqual({ submitted: true, status: 'approved' });
-        expect(kycRoute.calls).toHaveLength(1);
-        expect(
-            (kycRoute.calls![0]!.body as Record<string, unknown>)['pubkey'],
-        ).toBe('GANA');
-        expect(presignedCount).toBe(3); // one fresh URL per agreement
-        expect(agreements.calls!.map((call) => call.path)).toEqual([
-            '/ramp/agreements/electronic-signature',
-            '/ramp/agreements/terms-and-conditions',
-            '/ramp/agreements/customer-agreement',
-        ]);
-        // Each agreement got ITS OWN fresh presigned URL.
-        expect(
-            agreements.calls!.map(
-                (call) => (call.body as Record<string, unknown>)['presignedUrl'],
-            ),
-        ).toEqual(['https://p/1', 'https://p/2', 'https://p/3']);
-    });
-
-    it('still accepts the 3 agreements when /kyc rejects (already-approved retry)', async () => {
-        const kycRoute: Route = {
-            method: 'POST',
-            path: '/ramp/customer/c-1/kyc',
-            respond: { status: 400, body: { error: 'Customer already approved' } },
-        };
-        const onboardingRoute: Route = {
-            method: 'POST',
-            path: '/ramp/onboarding-url',
-            respond: { status: 200, body: { presigned_url: 'https://p/x' } },
-        };
-        const agreements: Route = {
-            method: 'POST',
-            path: (p) => p.startsWith('/ramp/agreements/'),
-            respond: { status: 200, body: { success: true } },
-        };
-        const client = sandboxClient([kycRoute, onboardingRoute, agreements]);
-
-        const result = await client.sandboxApproveKyc({ customerId: 'c-1', publicKey: 'GANA' });
-
-        expect(result).toEqual({ submitted: false, status: null });
-        expect(agreements.calls).toHaveLength(3);
-    });
-
-    it('still throws on non-API failures (network)', async () => {
-        const client = new EtherfuseClient({
-            apiKey: 'api_sand_t',
-            fetch: (() =>
-                Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch,
+        const client = sandboxClient([route]);
+        const receipt = await client.submitVerificationData('c-1', {
+            firstName: 'Ana',
+            lastName: 'Souza',
+            dateOfBirth: '1990-01-01',
+            country: 'BRA',
+            taxId: '52998224725',
+            address: {
+                street: 'Av. Paulista 1000',
+                city: 'Sao Paulo',
+                region: 'SP',
+                postalCode: '01310-100',
+                country: 'BRA',
+            },
         });
-        await expect(
-            client.sandboxApproveKyc({ customerId: 'c-1', publicKey: 'GANA' }),
-        ).rejects.toBeInstanceOf(TypeError);
+        expect(receipt).toEqual({ customerId: 'c-1', status: 'not_started' });
+        const sent = route.calls![0]!.body as Record<string, unknown>;
+        expect(sent['country']).toBe('BRA');
+        expect(sent['taxId']).toBe('52998224725');
     });
 
-    it('refuses to run outside sandbox', async () => {
-        const client = new EtherfuseClient({ apiKey: 'api_prod_t', fetch: mockFetch([]) });
+    it('propagates API errors (no silent best-effort — a 409 means wait and retry)', async () => {
+        const client = sandboxClient([
+            {
+                method: 'POST',
+                path: '/ramp/customer/c-1/verification',
+                respond: { status: 409, body: 'already approved' },
+            },
+        ]);
         await expect(
-            client.sandboxApproveKyc({ customerId: 'c', publicKey: 'G' }),
-        ).rejects.toBeInstanceOf(RampkitError);
+            client.submitVerificationData('c-1', {
+                firstName: 'A',
+                lastName: 'B',
+                dateOfBirth: '1990-01-01',
+                country: 'BRA',
+            }),
+        ).rejects.toMatchObject({ status: 409 });
     });
 });

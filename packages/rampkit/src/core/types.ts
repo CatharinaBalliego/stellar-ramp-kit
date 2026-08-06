@@ -268,19 +268,33 @@ export interface WalletKyc {
 }
 
 /**
- * Result of `sandboxApproveKyc`. Read `status` from here — an immediate
- * `GET /kyc/{pubkey}` after approval can lag behind and still report the
- * previous value.
+ * Identity data for the KYC API (`POST /ramp/customer/{id}/verification`,
+ * step 1 of https://docs.etherfuse.com/guides/kyc-api). Fields beyond the
+ * documented ones pass through untouched — the API validates.
  */
-export interface SandboxKycApproval {
-    /**
-     * False when the identity submit was rejected (typically: the customer
-     * is already approved) and only the agreement acceptances ran — the
-     * retroactive-recovery case.
-     */
-    submitted: boolean;
-    /** Status straight from the submit response; null when not submitted. */
-    status: WalletKycStatus | null;
+export interface VerificationData {
+    firstName: string;
+    lastName: string;
+    /** `YYYY-MM-DD`. */
+    dateOfBirth: string;
+    /** ISO 3166-1 alpha-3, e.g. `"BRA"`, `"MEX"` — routes the requirements. */
+    country: string;
+    /** CPF/RFC/… — the tax id of the customer's country. */
+    taxId?: string;
+    address?: {
+        street: string;
+        city: string;
+        region: string;
+        postalCode: string;
+        country: string;
+    };
+    [extra: string]: unknown;
+}
+
+/** `202 Accepted` receipt — applied asynchronously; poll `getCustomerKyc`. */
+export interface VerificationSubmission {
+    customerId: string;
+    status: KycStatus;
 }
 
 /**

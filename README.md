@@ -38,9 +38,12 @@ No real money is involved anywhere below.
 1. **Account + API key** — create an account at
    [sandbox.etherfuse.com](https://sandbox.etherfuse.com), open the KYB page
    and click **Approve KYB** (sandbox lets you approve yourself, no
-   documents), then generate an API key (`api_sand_…`).
-2. **Everything else is scripted** (same flow as
-   `npx @spacecathy/rampkit setup-sandbox`, which package consumers use):
+   documents), then generate an API key (`api_sand:…` — Etherfuse keys are
+   colon-separated: `api_{env}:{key_id}:{org_id}`).
+2. **Everything else is scripted**, with one short browser click-through
+   (Etherfuse offers no API for email confirmation, the liveness selfie, or
+   the customer agreement — even in sandbox they happen inside the hosted
+   flow, which auto-approves fake data):
 
    ```bash
    cp apps/demo/.env.local.example apps/demo/.env.local
@@ -48,13 +51,12 @@ No real money is involved anywhere below.
    node scripts/bootstrap-sandbox.mjs you@email.com
    ```
 
-   The script creates the customer and a funded testnet wallet, hands you
-   the hosted-onboarding link (one browser click-through: KYC + bank
-   account — sandbox auto-approves; **Mexico** requires
-   [this example Constancia](https://stablebonds.s3.us-west-2.amazonaws.com/example-constancia-de-situacion-fiscal.pdf)
-   at the tax step), verifies approval, and **writes `.env.local` for you**.
+   The script funds a testnet wallet (friendbot), creates the customer,
+   pre-pushes identity data over the KYC API (`submitVerificationData`) so
+   the browser step is minimal, hands you the hosted link (KYC + bank
+   account in one), verifies approval, and **writes `.env.local` for you**.
 
-   > The bootstrap rides an Etherfuse endpoint deprecated with sunset
+   > The hosted link rides an Etherfuse endpoint deprecated with sunset
    > **2026-08-16**; after that date, onboard via the in-app JWT flow
    > (`rampkit keygen` + `createKycLaunch`) or the dashboard instead.
 
@@ -65,12 +67,13 @@ npm run dev -w apps/demo
 # → http://localhost:3000  (home page shows an environment check)
 ```
 
-To test the **offramp** the wallet must hold CETES — there is no faucet:
-run an **onramp** first (≤ 500 MXN sandbox cap, "Simulate deposit", then
+The demo runs in **BRL** (assets discovered at runtime — no symbols
+hardcoded). To test the **offramp** the wallet must hold the stablebond —
+there is no faucet: run an **onramp** first ("Simulate deposit", then
 "Sign claim"); that also creates the trustline.
 
-Onramp flow: quote → create order → deposit instructions (SPEI CLABE for
-MXN, PIX code/key for BRL — the demo renders whichever rail the order
+Onramp flow: quote → create order → deposit instructions (PIX code/key for
+BRL, SPEI CLABE for MXN — the demo renders whichever rail the order
 carries) → **Simulate deposit** (sandbox button) → claim tokens (first-time
 wallets). Offramp flow: quote → preflight → order → sign the burn
 transaction (auto-regenerated as it expires) → payout tracked to

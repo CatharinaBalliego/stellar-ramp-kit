@@ -15,10 +15,12 @@ const makeClient = (routes: Route[], config: Partial<ConstructorParameters<typeo
     });
 
 describe('environment inference', () => {
-    it('infers sandbox from api_sand_ prefix', () => {
-        expect(new EtherfuseClient({ apiKey: 'api_sand_x' }).environment).toBe('sandbox');
+    it('infers the environment from real colon-separated keys (api_{env}:{key_id}:{org_id})', () => {
+        expect(new EtherfuseClient({ apiKey: 'api_sand:k1:org1' }).environment).toBe('sandbox');
+        expect(new EtherfuseClient({ apiKey: 'api_prod:k1:org1' }).environment).toBe('production');
     });
-    it('infers production from api_prod_ prefix', () => {
+    it('also accepts the underscore variant', () => {
+        expect(new EtherfuseClient({ apiKey: 'api_sand_x' }).environment).toBe('sandbox');
         expect(new EtherfuseClient({ apiKey: 'api_prod_x' }).environment).toBe('production');
     });
     it('defaults unknown prefixes to sandbox and emits an event', () => {

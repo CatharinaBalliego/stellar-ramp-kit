@@ -91,13 +91,23 @@ unit tests). The changes below are landed unless marked otherwise.
   documented "see org" 409 recovery, which retries with the EXISTING
   customer id instead of silently swallowing parse failures. Marked
   `@deprecated`, sunset 2026-08-16.
-- `sandboxApproveKyc()` (v0.4, sandbox-only): browserless KYC approval for
-  tests — programmatic identity submission plus the three agreement
-  acceptances, each with a fresh presigned URL (they are single-use). Since
-  v0.5 the identity submit is best-effort (an already-approved customer no
-  longer aborts the agreement acceptances) and the function returns the
-  status straight from the submit response — the wallet-scoped GET can lag
-  behind the approval.
+- API keys are matched by `api_sand`/`api_prod` prefix without assuming a
+  separator (v0.6): the real key format is colon-separated
+  (`api_{env}:{key_id}:{org_id}`, per
+  https://docs.etherfuse.com/authentication) — earlier releases checked for
+  `api_prod_` and would classify a real production key as sandbox.
+- CLI output is English by default with `--lang pt` / `RAMPKIT_LANG=pt`
+  opt-in (v0.6).
+- `sandboxApproveKyc()` (v0.4–v0.5) REMOVED in v0.6: Etherfuse removed its
+  underlying `POST /ramp/agreements/*` endpoints (Status: Removed,
+  https://docs.etherfuse.com/changelog/deprecations — calls now return
+  `410 endpoint_removed`), and documents that email confirmation, the
+  liveness selfie, and the customer agreement have NO API — they happen
+  only inside `/idv`, sandbox included. The v0.4 helper is therefore broken
+  server-side for everyone. Replacement: `submitVerificationData()` — the
+  documented KYC API (`POST /ramp/customer/{id}/verification`, sandbox AND
+  production) pushes identity data so the customer's one `/idv`
+  click-through only asks for what's left.
 - `customer.create` handler operation (v0.5): signup no longer needs a
   custom route. A new `signup` scope lets an authenticated app user without
   an Etherfuse identity yet create their customer; every other non-public

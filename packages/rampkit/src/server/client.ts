@@ -37,17 +37,23 @@ import type {
     RampEvent,
     RampOrder,
     RampPublicConfig,
+    KycStatus,
     RampQuote,
     RegenerateResult,
-    SandboxKycApproval,
+    VerificationData,
+    VerificationSubmission,
 } from '../core/types';
 import { signUserJwt, type OnboardingConfig } from './onboarding';
 
 export interface EtherfuseClientConfig {
-    /** Etherfuse API key (`api_sand_…` or `api_prod_…`). Server-side only. */
+    /**
+     * Etherfuse API key. Server-side only. Real keys are colon-separated:
+     * `api_{env}:{key_id}:{org_id}` (https://docs.etherfuse.com/authentication),
+     * e.g. `api_sand:…` / `api_prod:…`.
+     */
     apiKey: string;
     /**
-     * Defaults from the key prefix: `api_sand_…` → sandbox, `api_prod_…` →
+     * Defaults from the key prefix: `api_sand` → sandbox, `api_prod` →
      * production. Unknown prefixes default to sandbox (with an event).
      */
     environment?: RampEnvironment;
@@ -146,10 +152,12 @@ export class EtherfuseClient {
 
         let environment = config.environment;
         if (!environment) {
-            environment = config.apiKey.startsWith('api_prod_')
+            // Wire format is api_{env}:{key_id}:{org_id} — match on api_{env}
+            // only, so both the documented ':' and legacy '_' separators work.
+            environment = config.apiKey.startsWith('api_prod')
                 ? 'production'
                 : 'sandbox';
-            if (!config.apiKey.startsWith('api_sand_') && !config.apiKey.startsWith('api_prod_')) {
+            if (!config.apiKey.startsWith('api_sand') && !config.apiKey.startsWith('api_prod')) {
                 this.emit({ type: 'config:environment-defaulted', environment });
             }
         }
@@ -586,81 +594,28 @@ export class EtherfuseClient {
     }
 
     /**
-     * Approve a customer's KYC without a browser. **Sandbox only.**
+     * Push a customer's identity data over the API (the documented KYC API,
+     * step 1: `POST /ramp/customer/{id}/verification`) so the hosted `/idv`
+     * flow only asks for what's left. Works in sandbox AND production.
      *
-     * Internally: submits programmatic KYC identity data, then accepts the
-     * three legal agreements — each with a FRESH presigned URL (they are
-     * single-use for agreement acceptance). Rides deprecated endpoints
-     * (sunset 2026-08-16); meant for tests and dev automation, never UI.
+     * There is NO fully-programmatic approval: email confirmation, the
+     * liveness selfie, and the customer agreement can only be completed by
+     * the customer inside `/idv` — Etherfuse offers no API for those (and
+     * removed the old `/ramp/agreements/*` endpoints entirely). In sandbox
+     * the remaining launch is a short click-through with fake data.
      *
-     * The identity submit is best-effort: when Etherfuse rejects it (the
-     * customer is already approved — the retry-the-agreements case), the
-     * three agreements still run. Read the returned `status` instead of an
-     * immediate `GET /kyc/{pubkey}`, which can lag behind the approval.
+     * Responds `202 Accepted` — the data is applied asynchronously. Track
+     * progress via {@link getCustomerKyc} with `requirements: true`.
      */
-    async sandboxApproveKyc(args: {
-        customerId: string;
-        publicKey: string;
-        email?: string;
-        identity?: Record<string, unknown>;
-    }): Promise<SandboxKycApproval> {
-        if (this.environment !== 'sandbox') {
-            throw new RampkitError('sandboxApproveKyc is sandbox-only');
-        }
-        const email = args.email ?? `sandbox+${args.customerId.slice(0, 8)}@example.com`;
-
-        let submitted = false;
-        let status: WalletKycStatus | null = null;
-        try {
-            const { data } = await this.request<{ status?: WalletKycStatus } | null>(
-                'POST',
-                `/ramp/customer/${encodeURIComponent(args.customerId)}/kyc`,
-                {
-                    pubkey: args.publicKey,
-                    identity: args.identity ?? {
-                        name: { givenName: 'Sandbox', familyName: 'Tester' },
-                        dateOfBirth: '1990-01-01',
-                        address: {
-                            street: 'Av. Reforma 1',
-                            city: 'CDMX',
-                            region: 'CDMX',
-                            postalCode: '06600',
-                            country: 'MX',
-                        },
-                        idNumbers: [{ type: 'curp', value: 'XEXX010101HNEXXXA4' }],
-                    },
-                },
-            );
-            submitted = true;
-            status = data?.status ?? null;
-        } catch (error) {
-            // Best-effort: an API rejection (already approved) must not stop
-            // the agreements. Anything else (network, bad key…) still throws.
-            if (!(error instanceof EtherfuseApiError)) throw error;
-        }
-
-        for (const agreement of [
-            'electronic-signature',
-            'terms-and-conditions',
-            'customer-agreement',
-        ]) {
-            const { data } = await this.request<{ presigned_url: string }>(
-                'POST',
-                '/ramp/onboarding-url',
-                {
-                    customerId: args.customerId,
-                    bankAccountId: randomUUID(),
-                    publicKey: args.publicKey,
-                    blockchain: 'stellar',
-                    userInfo: { email, displayName: email },
-                },
-            );
-            await this.request('POST', `/ramp/agreements/${agreement}`, {
-                presignedUrl: data.presigned_url,
-            });
-        }
-
-        return { submitted, status };
+    async submitVerificationData(
+        customerId: string,
+        data: VerificationData,
+    ): Promise<VerificationSubmission> {
+        const { data: body } = await this.request<{
+            customerId: string;
+            status: KycStatus;
+        }>('POST', `/ramp/customer/${encodeURIComponent(customerId)}/verification`, data);
+        return { customerId: body.customerId, status: body.status };
     }
 
     // -----------------------------------------------------------------------

@@ -9,6 +9,9 @@
  * Uses POST /ramp/onboarding-url — deprecated upstream with sunset
  * 2026-08-16 (https://docs.etherfuse.com/changelog/deprecations). Fine as a
  * dev-only bootstrap until then; the runtime library never touches it.
+ *
+ * Output is English by default; `--lang pt` (or RAMPKIT_LANG=pt) switches
+ * the interactive messages to Portuguese.
  */
 
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
@@ -21,11 +24,22 @@ const SANDBOX = 'https://api.sand.etherfuse.com';
 const FRIENDBOT = 'https://friendbot.stellar.org';
 const SUNSET_UTC = Date.UTC(2026, 7, 16);
 
+const langFlag = process.argv.indexOf('--lang');
+const LANG: 'en' | 'pt' =
+    (langFlag >= 0 ? process.argv[langFlag + 1] : process.env['RAMPKIT_LANG']) === 'pt'
+        ? 'pt'
+        : 'en';
+/** English default; both languages live side by side at each call site. */
+const t = (en: string, pt: string): string => (LANG === 'pt' ? pt : en);
+
 const USAGE = `rampkit — Etherfuse ramp kit for Stellar (community package)
 
 Usage:
-  npx @spacecathy/rampkit setup-sandbox <email> [--key api_sand_...] [--write <file>]
+  npx @spacecathy/rampkit setup-sandbox <email> [--key api_sand:...] [--write <file>]
   npx @spacecathy/rampkit keygen [--out <private.pem>] [--kid <key-id>]
+
+Options:
+  --lang pt        Portuguese output (default: English; env: RAMPKIT_LANG=pt)
 
 setup-sandbox: creates a sandbox customer + funded testnet wallet and walks
 you through the hosted KYC once, then prints (or --write's) the env values a
@@ -40,7 +54,7 @@ the private key to a file, and prints the JWKS + the registration checklist.
 
 const log = (...a: unknown[]) => console.log('•', ...a);
 const fail = (msg: string): never => {
-    console.error(`\nERRO: ${msg}`);
+    console.error(`\n${t('ERROR', 'ERRO')}: ${msg}`);
     process.exit(1);
 };
 
@@ -65,25 +79,49 @@ async function setupSandbox(args: string[]): Promise<void> {
         (keyFlag >= 0 ? args[keyFlag + 1] : undefined) ?? process.env['ETHERFUSE_API_KEY'];
     const writePath = writeFlag >= 0 ? args[writeFlag + 1] : undefined;
 
-    if (!email) fail(`falta o e-mail.\n\n${USAGE}`);
-    if (!apiKey) fail('falta a API key: passe --key api_sand_... ou defina ETHERFUSE_API_KEY.');
-    if (!apiKey!.startsWith('api_sand_')) {
-        fail('essa key não é de sandbox (esperado prefixo api_sand_). Nunca use produção aqui.');
+    if (!email) fail(`${t('missing the email.', 'falta o e-mail.')}\n\n${USAGE}`);
+    if (!apiKey) {
+        fail(
+            t(
+                'missing the API key: pass --key api_sand:... or set ETHERFUSE_API_KEY.',
+                'falta a API key: passe --key api_sand:... ou defina ETHERFUSE_API_KEY.',
+            ),
+        );
+    }
+    if (!apiKey!.startsWith('api_sand')) {
+        fail(
+            t(
+                'that key is not a sandbox key (expected api_sand prefix). Never use production here.',
+                'essa key não é de sandbox (esperado prefixo api_sand). Nunca use produção aqui.',
+            ),
+        );
     }
     if (Date.now() > SUNSET_UTC) {
         console.warn(
-            '\nAVISO: o endpoint de onboarding usado por este bootstrap tinha sunset em\n' +
-                '2026-08-16 e pode ter sido removido pela Etherfuse. Se falhar, crie o\n' +
-                'customer via dashboard/fluxo JWT: https://docs.etherfuse.com/guides/kyc-websdk\n',
+            t(
+                '\nWARNING: the onboarding endpoint this bootstrap uses had its sunset on\n' +
+                    '2026-08-16 and may have been removed by Etherfuse. If it fails, create the\n' +
+                    'customer via the dashboard/JWT flow: https://docs.etherfuse.com/guides/kyc-websdk\n',
+                '\nAVISO: o endpoint de onboarding usado por este bootstrap tinha sunset em\n' +
+                    '2026-08-16 e pode ter sido removido pela Etherfuse. Se falhar, crie o\n' +
+                    'customer via dashboard/fluxo JWT: https://docs.etherfuse.com/guides/kyc-websdk\n',
+            ),
         );
     }
 
     // 1 · wallet
     const wallet = generateStellarKeypair();
-    log(`Carteira testnet: ${wallet.publicKey}`);
-    log('Fundando via friendbot…');
+    log(`${t('Testnet wallet', 'Carteira testnet')}: ${wallet.publicKey}`);
+    log(t('Funding via friendbot…', 'Fundando via friendbot…'));
     const fb = await fetch(`${FRIENDBOT}?addr=${wallet.publicKey}`);
-    if (!fb.ok) log(`friendbot retornou ${fb.status} (se a conta já existe, ok)`);
+    if (!fb.ok) {
+        log(
+            t(
+                `friendbot returned ${fb.status} (ok if the account already exists)`,
+                `friendbot retornou ${fb.status} (se a conta já existe, ok)`,
+            ),
+        );
+    }
 
     // 2 · customer + hosted onboarding
     const customerId = randomUUID();
@@ -104,18 +142,25 @@ async function setupSandbox(args: string[]): Promise<void> {
 
     console.log(`
 ================================================================================
-ABRA ESTE LINK e complete o onboarding (vale 15 minutos):
+${t(
+    'OPEN THIS LINK and complete the onboarding (valid for 15 minutes):',
+    'ABRA ESTE LINK e complete o onboarding (vale 15 minutos):',
+)}
 
 ${presigned_url}
 
-Sandbox aceita dados falsos e auto-aprova. México pede a Constancia — use o
-exemplo da Etherfuse:
+${t(
+    'Sandbox accepts fake data and auto-approves. Mexico asks for the Constancia —\nuse the Etherfuse example:',
+    'Sandbox aceita dados falsos e auto-aprova. México pede a Constancia — use o\nexemplo da Etherfuse:',
+)}
 https://stablebonds.s3.us-west-2.amazonaws.com/example-constancia-de-situacion-fiscal.pdf
 ================================================================================
 `);
 
     const rl = createInterface({ input: process.stdin, output: process.stdout });
-    await rl.question('Terminou o fluxo no browser? [enter] ');
+    await rl.question(
+        t('Done with the browser flow? [enter] ', 'Terminou o fluxo no browser? [enter] '),
+    );
     rl.close();
 
     // 3 · wait for approval (sandbox is fast; poll up to ~2 min)
@@ -128,13 +173,18 @@ https://stablebonds.s3.us-west-2.amazonaws.com/example-constancia-de-situacion-f
         );
         status = kyc?.status ?? 'unknown';
         if (status === 'approved') break;
-        log(`KYC: ${status} — aguardando…`);
+        log(t(`KYC: ${status} — waiting…`, `KYC: ${status} — aguardando…`));
         await new Promise((r) => setTimeout(r, 5000));
     }
     if (status !== 'approved') {
-        fail(`KYC terminou como "${status}". Complete o fluxo e rode o comando de novo.`);
+        fail(
+            t(
+                `KYC ended as "${status}". Finish the flow and run the command again.`,
+                `KYC terminou como "${status}". Complete o fluxo e rode o comando de novo.`,
+            ),
+        );
     }
-    log('KYC aprovado ✓');
+    log(t('KYC approved ✓', 'KYC aprovado ✓'));
 
     // 4 · output
     const envBlock = [
@@ -149,21 +199,29 @@ https://stablebonds.s3.us-west-2.amazonaws.com/example-constancia-de-situacion-f
 
     if (writePath) {
         writeFileSync(writePath, envBlock);
-        log(`Gravado ${writePath}`);
+        log(t(`Wrote ${writePath}`, `Gravado ${writePath}`));
     } else {
         console.log(`\n${envBlock}`);
     }
 
-    console.log(`No seu app, a sessão desse usuário fica:
+    console.log(`${t(
+        "In your app, this user's session is:",
+        'No seu app, a sessão desse usuário fica:',
+    )}
 
   getSession: async () => ({
       customerId: '${customerId}',
       publicKey: '${wallet.publicKey}',
   })
 
-Para o offramp ter o que vender, rode um onramp primeiro (≤500 MXN no
-sandbox, simule o depósito via a operação sandbox.simulateDeposit e assine o
-claim) — isso também cria a trustline. Docs: https://www.npmjs.com/package/@spacecathy/rampkit
+${t(
+    'For the offramp to have something to sell, run an onramp first (simulate\n' +
+        'the deposit via the sandbox.simulateDeposit operation and sign the claim)\n' +
+        '— that also creates the trustline.',
+    'Para o offramp ter o que vender, rode um onramp primeiro (simule o\n' +
+        'depósito via a operação sandbox.simulateDeposit e assine o claim) —\n' +
+        'isso também cria a trustline.',
+)} Docs: https://www.npmjs.com/package/@spacecathy/rampkit
 `);
 }
 
@@ -179,24 +237,52 @@ function keygen(args: string[]): void {
     const keyId = (kidFlag >= 0 ? args[kidFlag + 1] : undefined) ?? `rampkit-${randomUUID().slice(0, 8)}`;
 
     if (existsSync(outPath)) {
-        fail(`${outPath} já existe — não vou sobrescrever uma chave privada. Use --out <outro-arquivo>.`);
+        fail(
+            t(
+                `${outPath} already exists — refusing to overwrite a private key. Use --out <other-file>.`,
+                `${outPath} já existe — não vou sobrescrever uma chave privada. Use --out <outro-arquivo>.`,
+            ),
+        );
     }
 
-    log('Gerando chave RSA 2048…');
+    log(t('Generating RSA 2048 key…', 'Gerando chave RSA 2048…'));
     const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
     writeFileSync(outPath, pem, { mode: 0o600 });
-    log(`Chave privada gravada em ${outPath} (NUNCA commite este arquivo)`);
+    log(
+        t(
+            `Private key written to ${outPath} (NEVER commit this file)`,
+            `Chave privada gravada em ${outPath} (NUNCA commite este arquivo)`,
+        ),
+    );
 
     const jwks = createJwks({ privateKey: pem, keyId });
 
     console.log(`
-JWKS (público — é isso que a Etherfuse busca para verificar seus JWTs):
+${t(
+    'JWKS (public — this is what Etherfuse fetches to verify your JWTs):',
+    'JWKS (público — é isso que a Etherfuse busca para verificar seus JWTs):',
+)}
 
 ${JSON.stringify(jwks, null, 2)}
 
 ================================================================================
-CHECKLIST — registro do /idv (uma vez por ambiente):
+${t(
+    `CHECKLIST — /idv registration (once per environment):
+
+1. Store ${outPath} as a server secret (env/secret manager; out of git).
+2. Serve the JWKS above at a stable HTTPS URL — in your app:
+     import { createJwksHandler } from '@spacecathy/rampkit/server';
+     // e.g. app/.well-known/jwks.json/route.ts
+     export const GET = createJwksHandler({ privateKey, keyId: '${keyId}' });
+3. Send your Etherfuse representative: your ISSUER (e.g. https://yourapp.com)
+   and the JWKS URL. Registration is not self-serve on their side yet.
+4. Configure the client:
+     new EtherfuseClient({ apiKey, onboarding: {
+         issuer: '<your issuer>', privateKey, keyId: '${keyId}' } })
+
+After that, kyc.startSession / useKyc().launch work for every user.`,
+    `CHECKLIST — registro do /idv (uma vez por ambiente):
 
 1. Guarde ${outPath} como segredo do servidor (env/secret manager; fora do git).
 2. Sirva o JWKS acima numa URL HTTPS estável — no seu app:
@@ -209,7 +295,8 @@ CHECKLIST — registro do /idv (uma vez por ambiente):
      new EtherfuseClient({ apiKey, onboarding: {
          issuer: '<seu issuer>', privateKey, keyId: '${keyId}' } })
 
-Depois disso, kyc.startSession / useKyc().launch funcionam para todo usuário.
+Depois disso, kyc.startSession / useKyc().launch funcionam para todo usuário.`,
+)}
 ================================================================================
 `);
 }
