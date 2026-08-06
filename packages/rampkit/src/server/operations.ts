@@ -6,6 +6,10 @@ import type { EtherfuseClient } from './client';
 export interface RampSession {
     customerId: string;
     publicKey: string;
+    /** Used for KYC launches (`kyc.startSession`) when present. */
+    email?: string;
+    /** Display name for KYC launches. */
+    name?: string;
 }
 
 /** Thrown by param validation → 400. */
@@ -108,6 +112,38 @@ export const RAMP_OPERATIONS = {
         method: 'GET',
         scope: 'customer',
         execute: async (client, session) => client.listBankAccounts(session!.customerId),
+    },
+
+    'kyc.status': {
+        method: 'GET',
+        scope: 'customer',
+        execute: async (client, session, params) =>
+            client.getCustomerKyc(session!.customerId, {
+                requirements: params['requirements'] === 'true',
+            }),
+    },
+
+    'kyc.startSession': {
+        method: 'POST',
+        scope: 'customer',
+        execute: async (client, session, params) => {
+            // Identity comes from the session when the app provides it there;
+            // params only fill the gaps (they're not identity, just claims).
+            const email = session!.email ?? optional(params, 'email');
+            const name = session!.name ?? optional(params, 'name') ?? email;
+            if (!email) {
+                throw new BadParamsError(
+                    'kyc.startSession needs the user email (via session or params)',
+                );
+            }
+            return client.createKycLaunch({
+                customerId: session!.customerId,
+                email,
+                name: name!,
+                returnUrl: optional(params, 'returnUrl'),
+                lang: optional(params, 'lang'),
+            });
+        },
     },
 
     'onramp.createOrder': {

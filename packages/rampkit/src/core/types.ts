@@ -10,6 +10,7 @@ export type RampEvent =
     | { type: 'etherfuse:response'; method: string; path: string; status: number; ms: number }
     | { type: 'etherfuse:error'; method: string; path: string; status: number; message: string }
     | { type: 'order:recovered'; orderId: string }
+    | { type: 'customer:recovered'; customerId: string }
     | { type: 'preflight:failed'; publicKey: string; issues: readonly PreflightIssue[] }
     | { type: 'horizon:submitted'; hash: string }
     | { type: 'config:environment-defaulted'; environment: RampEnvironment };
@@ -194,6 +195,61 @@ export type PreflightResult =
     | { ok: false; issues: readonly PreflightIssue[] };
 
 // ---------------------------------------------------------------------------
+// Customers & KYC (in-app onboarding)
+// ---------------------------------------------------------------------------
+
+/** Documented KYC lifecycle statuses. */
+export type KycStatus = 'not_started' | 'in_progress' | 'submitted' | 'approved' | 'denied';
+
+export interface KycRequirement {
+    /** e.g. `personal_data`, `identity_document`, `selfie`, `tax_document`. */
+    type: string;
+    status: 'satisfied' | 'pending' | 'awaiting_review' | 'action_required';
+    /** True when only the hosted `/idv` flow can satisfy it. */
+    requiresLaunch: boolean;
+}
+
+export interface CustomerKyc {
+    customerId: string;
+    status: KycStatus;
+    currentRejectionReason: string | null;
+    approvedAt: string | null;
+    /**
+     * Per-requirement breakdown (only when requested with `requirements`).
+     * Absent until the customer is routed to their country's requirements,
+     * and it can GROW later (e.g. `proof_of_address`).
+     */
+    requirements: KycRequirement[] | null;
+}
+
+/** Result of creating (or idempotently recovering) a customer. */
+export interface CreatedCustomer {
+    customerId: string;
+    /** Wallet registered for the customer, when one was provided. */
+    publicKey: string | null;
+    /** True when the id already existed (safe signup retry). */
+    recovered: boolean;
+}
+
+/**
+ * A hosted-KYC launch: the browser submits these fields as a normal HTML
+ * form POST to `url`, landing the user in Etherfuse's `/idv` flow. The
+ * assertion is a short-lived RS256 JWT signed server-side.
+ */
+export interface KycLaunch {
+    /** `{host}/auth/launch` for the active environment. */
+    url: string;
+    fields: {
+        grant_type: string;
+        assertion: string;
+        target: string;
+        return_url?: string;
+    };
+    /** ISO 8601 — the assertion expires ~5 minutes after minting. */
+    expiresAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Transaction freshness
 // ---------------------------------------------------------------------------
 
@@ -220,6 +276,8 @@ export type RampOperation =
     | 'assets.list'
     | 'quote.create'
     | 'bankAccounts.list'
+    | 'kyc.status'
+    | 'kyc.startSession'
     | 'onramp.createOrder'
     | 'offramp.createOrder'
     | 'offramp.preflight'

@@ -7,7 +7,9 @@ import { isTerminalStatus, quoteRemainingMs } from '../core/machines';
 import type { OfframpPhase, OnrampPhase } from '../core/machines';
 import { pollingSource } from '../core/polling';
 import type {
+    CustomerKyc,
     DepositInstructions,
+    KycLaunch,
     PreflightIssue,
     RampAsset,
     RampOrder,
@@ -88,6 +90,97 @@ export function useRampAssets(args: { currency: string }): UseRampAssetsResult {
         isLoading: state.isLoading,
         error: state.error,
         reload: useCallback(() => dispatch({ type: 'reload' }), []),
+    };
+}
+
+// ---------------------------------------------------------------------------
+// useKyc — verification gate + hosted-KYC launch
+// ---------------------------------------------------------------------------
+
+export interface UseKycResult {
+    /** Current KYC state (null while first loading). */
+    kyc: CustomerKyc | null;
+    /** Convenience: kyc?.status === 'approved'. */
+    isApproved: boolean;
+    isLoading: boolean;
+    error: Error | null;
+    /** Re-read the status (e.g. after the user returns from the flow). */
+    refresh: () => Promise<void>;
+    /**
+     * Launch the hosted KYC: fetches a signed launch from your server and
+     * form-POSTs the user into Etherfuse's `/idv` flow.
+     */
+    launch: (opts?: { returnUrl?: string; lang?: string; newTab?: boolean }) => Promise<void>;
+}
+
+export function useKyc(options: { requirements?: boolean } = {}): UseKycResult {
+    const { client } = useRampContext();
+    const [state, dispatch] = useReducer(
+        (
+            prev: { kyc: CustomerKyc | null; isLoading: boolean; error: Error | null },
+            action:
+                | { type: 'start' }
+                | { type: 'ok'; kyc: CustomerKyc }
+                | { type: 'fail'; error: Error },
+        ) => {
+            switch (action.type) {
+                case 'start':
+                    return { ...prev, isLoading: true, error: null };
+                case 'ok':
+                    return { kyc: action.kyc, isLoading: false, error: null };
+                case 'fail':
+                    return { ...prev, isLoading: false, error: action.error };
+            }
+        },
+        { kyc: null, isLoading: true, error: null },
+    );
+
+    const refresh = useCallback(async () => {
+        dispatch({ type: 'start' });
+        try {
+            const kyc = await client.getKycStatus({ requirements: options.requirements });
+            dispatch({ type: 'ok', kyc });
+        } catch (error) {
+            dispatch({ type: 'fail', error: toError(error) });
+        }
+    }, [client, options.requirements]);
+
+    useEffect(() => {
+        void refresh();
+    }, [refresh]);
+
+    const launch = useCallback(
+        async (opts: { returnUrl?: string; lang?: string; newTab?: boolean } = {}) => {
+            const session: KycLaunch = await client.startKycSession({
+                returnUrl: opts.returnUrl ?? window.location.href,
+                lang: opts.lang,
+            });
+            // The launch is a plain HTML form POST to Etherfuse's app.
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = session.url;
+            if (opts.newTab) form.target = '_blank';
+            for (const [name, value] of Object.entries(session.fields)) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = name;
+                input.value = value;
+                form.appendChild(input);
+            }
+            document.body.appendChild(form);
+            form.submit();
+            form.remove();
+        },
+        [client],
+    );
+
+    return {
+        kyc: state.kyc,
+        isApproved: state.kyc?.status === 'approved',
+        isLoading: state.isLoading,
+        error: state.error,
+        refresh,
+        launch,
     };
 }
 

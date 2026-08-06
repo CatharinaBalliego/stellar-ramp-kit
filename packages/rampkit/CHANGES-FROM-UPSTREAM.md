@@ -28,9 +28,15 @@ unit tests). The changes below are landed unless marked otherwise.
   SvelteKit proxy routes; no arbitrary path proxying. Caller identity comes
   from a required `getSession`, not from the request body
   (`src/server/handler.ts`, `src/server/operations.ts`).
-- Onboarding/KYC endpoints are out of scope for v0: upstream is built on
-  `POST /ramp/onboarding-url`, deprecated with sunset 2026-08-16
-  (https://docs.etherfuse.com/changelog/deprecations).
+- Onboarding rebuilt on the surviving endpoints (v0.3): upstream's
+  `createCustomer`/`getKycUrl` rode `POST /ramp/onboarding-url`, deprecated
+  with sunset 2026-08-16 (https://docs.etherfuse.com/changelog/deprecations).
+  Rampkit instead creates customers via `POST /ramp/organization` + wallet
+  registration, and launches hosted KYC via the JWT/`/idv` flow — with
+  zero-dependency RS256 signing and JWKS helpers (`src/server/onboarding.ts`).
+  Requires the platform's one-time issuer/JWKS registration with Etherfuse.
+  The deprecated endpoint survives only inside the sandbox bootstrap CLI, as
+  a dev convenience until its sunset.
 - React hooks (`useOnramp` / `useOfframp`) own the flow state machines,
   including expired-transaction and waiting-for-regeneration states, and
   proactively regenerate the burn XDR (~50s) while it is open for signing

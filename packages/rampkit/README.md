@@ -132,6 +132,45 @@ const onramp = useOnramp();
 `transaction_ready`, `regenerating`, `preflight_failed`, …) so your UI can
 render every step, including expiry and regeneration, without guessing.
 
+## Onboarding users inside your app (v0.3)
+
+The full lifecycle — *user signs up → app creates their customer → user
+completes KYC in-app → user ramps* — without dashboards or CLIs:
+
+```ts
+// 1 · At signup, in YOUR backend (server-to-server; not a browser op):
+const { customerId } = await client.createCustomer({
+    email: user.email,
+    publicKey: user.stellarAddress, // binds their wallet (idempotent)
+});
+await db.users.update(user.id, { etherfuseCustomerId: customerId });
+```
+
+```tsx
+// 2 · In the app: gate on KYC and launch the hosted flow when needed
+import { useKyc } from '@spacecathy/rampkit/react';
+
+const { isApproved, kyc, launch } = useKyc();
+// !isApproved → <button onClick={() => launch()}>Verify identity</button>
+// The user completes document + liveness + agreements at Etherfuse and
+// returns; sandbox auto-approves.
+```
+
+**One-time platform setup** (per environment, required for `launch`):
+Etherfuse verifies a JWT your server signs, against a JWKS you host.
+
+1. Generate an RSA keypair:
+   `openssl genrsa -out private.pem 2048`
+2. Serve the JWKS — mount `createJwksHandler({ privateKey, keyId })` at a
+   stable HTTPS URL (e.g. `/.well-known/jwks.json`).
+3. Send your **issuer** and **JWKS URL** to your Etherfuse representative —
+   registration is not self-serve on their side yet.
+4. Configure the client:
+   `new EtherfuseClient({ apiKey, onboarding: { issuer, privateKey, keyId } })`
+
+Until step 3 is done (or for quick sandbox testing), the
+`npx @spacecathy/rampkit setup-sandbox` bootstrap remains the shortcut.
+
 ## Where do `customerId`s live? (not in env vars!)
 
 One `customerId` per **end user** of your platform — it's their verified
@@ -183,12 +222,12 @@ infinite spinner.
 - Sandbox: onramps are capped at 500 MXN and funded via
   `sandbox.simulateDeposit` (hidden in production).
 
-## v0 scope
+## Scope
 
-Etherfuse only, Stellar only, default burn flow. Out of scope: onboarding/KYC
-(see Requirements), anchor mode, embedded wallets, swaps, webhooks (polling
-covers freshness; a WebSocket source is planned behind the same
-`TransactionSource` interface).
+Etherfuse only, Stellar only, default burn flow. In since v0.3: in-app
+onboarding (customer creation + hosted-KYC launch). Out of scope: anchor
+mode, embedded wallets, swaps, webhooks (polling covers freshness; a
+WebSocket source is planned behind the same `TransactionSource` interface).
 
 ## License & attribution
 

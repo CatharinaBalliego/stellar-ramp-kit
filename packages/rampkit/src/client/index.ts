@@ -6,6 +6,8 @@
 
 import { RampkitError } from '../core/errors';
 import type {
+    CustomerKyc,
+    KycLaunch,
     PreflightIssue,
     PreflightResult,
     RampAsset,
@@ -58,6 +60,14 @@ export interface RampClient {
         amount: string;
     }): Promise<RampQuote>;
     listBankAccounts(): Promise<RampBankAccount[]>;
+    getKycStatus(args?: { requirements?: boolean }): Promise<CustomerKyc>;
+    /** Mint a hosted-KYC launch for the session's customer (server signs the JWT). */
+    startKycSession(args?: {
+        email?: string;
+        name?: string;
+        returnUrl?: string;
+        lang?: string;
+    }): Promise<KycLaunch>;
     createOnrampOrder(args: {
         quoteId: string;
         bankAccountId: string;
@@ -124,6 +134,9 @@ export function createRampClient(options: CreateRampClientOptions = {}): RampCli
         listAssets: (args) => call('assets.list', 'GET', args),
         createQuote: (args) => call('quote.create', 'POST', args),
         listBankAccounts: () => call('bankAccounts.list', 'GET'),
+        getKycStatus: (args = {}) =>
+            call('kyc.status', 'GET', args.requirements ? { requirements: 'true' } : {}),
+        startKycSession: (args = {}) => call('kyc.startSession', 'POST', args),
         createOnrampOrder: (args) => call('onramp.createOrder', 'POST', args),
         createOfframpOrder: (args) => call('offramp.createOrder', 'POST', args),
         preflightOfframp: (args) => call('offramp.preflight', 'POST', args),

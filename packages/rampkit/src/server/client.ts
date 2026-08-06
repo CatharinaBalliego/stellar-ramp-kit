@@ -21,7 +21,11 @@ import {
 } from '../core/errors';
 import { offrampPreflight } from '../core/horizon';
 import type {
+    CreatedCustomer,
+    CustomerKyc,
     DepositInstructions,
+    KycLaunch,
+    KycRequirement,
     PreflightResult,
     RampAsset,
     RampBankAccount,
@@ -33,6 +37,7 @@ import type {
     RampQuote,
     RegenerateResult,
 } from '../core/types';
+import { signUserJwt, type OnboardingConfig } from './onboarding';
 
 export interface EtherfuseClientConfig {
     /** Etherfuse API key (`api_sand_…` or `api_prod_…`). Server-side only. */
@@ -50,6 +55,11 @@ export interface EtherfuseClientConfig {
     onEvent?: (event: RampEvent) => void;
     /** Injectable for tests/proxies. Defaults to global fetch. */
     fetch?: typeof globalThis.fetch;
+    /**
+     * Enables in-app KYC launches ({@link EtherfuseClient.createKycLaunch}).
+     * Requires the one-time issuer + JWKS registration with Etherfuse.
+     */
+    onboarding?: OnboardingConfig;
 }
 
 // --- Raw wire shapes (internal) --------------------------------------------
@@ -119,6 +129,8 @@ export class EtherfuseClient {
     private readonly network: 'testnet' | 'public';
     private readonly fetchImpl: typeof globalThis.fetch;
     private readonly onEvent: ((event: RampEvent) => void) | undefined;
+    private readonly statusHost: string;
+    private readonly onboarding: OnboardingConfig | undefined;
 
     constructor(config: EtherfuseClientConfig) {
         if (!config.apiKey) throw new RampkitError('EtherfuseClient: apiKey is required');
@@ -141,7 +153,9 @@ export class EtherfuseClient {
         this.horizonUrl = config.horizonUrl ?? net.horizonUrl;
         this.networkPassphrase = net.networkPassphrase;
         this.network = net.network;
+        this.statusHost = net.statusHost;
         this.fetchImpl = config.fetch ?? fetch;
+        this.onboarding = config.onboarding;
     }
 
     private emit(event: RampEvent): void {
@@ -325,6 +339,126 @@ export class EtherfuseClient {
                 createdAt: account.createdAt,
             };
         });
+    }
+
+    // -----------------------------------------------------------------------
+    // Customers & KYC (in-app onboarding)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Create a customer — call this from YOUR signup flow. Creates a
+     * `personal` organization (the id doubles as the `customerId` everywhere
+     * else; generate it once and persist it in your user record) and
+     * optionally registers the user's Stellar wallet.
+     *
+     * Idempotent for retries: a 409 on the same id means the customer
+     * already exists and is returned as `recovered`.
+     *
+     * `email` is required by Etherfuse — it's the address the customer
+     * confirms during verification and the only place it comes from.
+     */
+    async createCustomer(args: {
+        email: string;
+        displayName?: string;
+        /** Persist and reuse across retries; defaults to a fresh UUID. */
+        customerId?: string;
+        /** Stellar wallet to bind to the customer (registration is idempotent). */
+        publicKey?: string;
+    }): Promise<CreatedCustomer> {
+        const customerId = args.customerId ?? randomUUID();
+        const displayName = args.displayName ?? args.email;
+
+        let recovered = false;
+        try {
+            await this.request('POST', '/ramp/organization', {
+                id: customerId,
+                accountType: 'personal',
+                displayName,
+                userInfo: { email: args.email, displayName },
+            });
+        } catch (error) {
+            if (error instanceof EtherfuseApiError && error.status === 409) {
+                // The id already exists — a safe signup retry.
+                recovered = true;
+                this.emit({ type: 'customer:recovered', customerId });
+            } else {
+                throw error;
+            }
+        }
+
+        if (args.publicKey) {
+            await this.request(
+                'POST',
+                `/ramp/customer/${encodeURIComponent(customerId)}/wallet`,
+                { publicKey: args.publicKey, blockchain: 'stellar' },
+            );
+        }
+
+        return { customerId, publicKey: args.publicKey ?? null, recovered };
+    }
+
+    /** Current KYC state for a customer; `requirements` adds the step-by-step breakdown. */
+    async getCustomerKyc(
+        customerId: string,
+        opts: { requirements?: boolean } = {},
+    ): Promise<CustomerKyc> {
+        const query = opts.requirements ? '?requirements=true' : '';
+        const { data } = await this.request<{
+            customerId: string;
+            status: CustomerKyc['status'];
+            currentRejectionReason?: string | null;
+            approvedAt?: string | null;
+            requirements?: KycRequirement[];
+        }>('GET', `/ramp/customer/${encodeURIComponent(customerId)}/kyc${query}`);
+        return {
+            customerId: data.customerId,
+            status: data.status,
+            currentRejectionReason: data.currentRejectionReason ?? null,
+            approvedAt: data.approvedAt ?? null,
+            requirements: data.requirements ?? null,
+        };
+    }
+
+    /**
+     * Mint a hosted-KYC launch for a customer: the browser form-POSTs the
+     * returned fields to `url` and the user lands in Etherfuse's `/idv`
+     * flow (identity document, liveness, agreements — auto-approved in
+     * sandbox). Requires the `onboarding` config (registered issuer + JWKS).
+     */
+    createKycLaunch(args: {
+        customerId: string;
+        email: string;
+        name: string;
+        /** Send the user back to your app afterwards. */
+        returnUrl?: string;
+        /** `'es'` renders the whole flow in Spanish. */
+        lang?: string;
+    }): KycLaunch {
+        if (!this.onboarding) {
+            throw new RampkitError(
+                'createKycLaunch requires the `onboarding` config (issuer, privateKey, keyId). ' +
+                    'Generate an RSA keypair, host the JWKS (createJwksHandler), and register ' +
+                    'issuer + JWKS URL with your Etherfuse representative.',
+            );
+        }
+        const { token, expiresAt } = signUserJwt({
+            config: this.onboarding,
+            audience: `${this.baseUrl}/auth/token`,
+            customerId: args.customerId,
+            email: args.email,
+            name: args.name,
+            scope: 'verification',
+        });
+        return {
+            url: `${this.statusHost}/auth/launch`,
+            fields: {
+                grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                assertion: token,
+                target: args.lang ? `/idv?lang=${encodeURIComponent(args.lang)}` : '/idv',
+                ...(args.returnUrl ? { return_url: args.returnUrl } : {}),
+            },
+            expiresAt,
+        };
     }
 
     // -----------------------------------------------------------------------

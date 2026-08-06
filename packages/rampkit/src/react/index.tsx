@@ -12,9 +12,11 @@ export {
 
 export {
     useRampAssets,
+    useKyc,
     useOnramp,
     useOfframp,
     type UseRampAssetsResult,
+    type UseKycResult,
     type UseOnrampResult,
     type UseOfframpOptions,
     type UseOfframpResult,

@@ -18,6 +18,12 @@ export {
     type CreateRampHandlerOptions,
     type GetSession,
 } from './handler';
+export {
+    signUserJwt,
+    createJwks,
+    createJwksHandler,
+    type OnboardingConfig,
+} from './onboarding';
 
 // Server-relevant core re-exports, so consumers can import from one place.
 export { offrampPreflight, fetchAccount } from '../core/horizon';
@@ -41,4 +47,9 @@ export type {
     PreflightResult,
     RampOperation,
     RampPublicConfig,
+    CreatedCustomer,
+    CustomerKyc,
+    KycRequirement,
+    KycStatus,
+    KycLaunch,
 } from '../core/types';
