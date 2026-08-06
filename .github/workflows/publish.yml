@@ -1,0 +1,36 @@
+name: Publish to npm
+
+# npm Trusted Publishing (OIDC): no tokens, no OTP. One-time setup on
+# npmjs.com — package @spacecathy/rampkit → Settings → Trusted Publisher →
+# GitHub Actions → owner: CatharinaBalliego, repo: stellar-ramp-kit,
+# workflow: publish.yml. Then publish by running this workflow (or pushing
+# a v* tag).
+
+on:
+    workflow_dispatch:
+    push:
+        tags: ['v*']
+
+permissions:
+    contents: read
+    id-token: write # OIDC — required for trusted publishing
+
+jobs:
+    publish:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  registry-url: 'https://registry.npmjs.org'
+
+            # Trusted publishing needs npm >= 11.5.1
+            - run: npm install -g npm@11
+
+            - run: npm ci
+
+            # prepublishOnly runs typecheck + tests + build before the upload
+            - run: npm publish
+              working-directory: packages/rampkit

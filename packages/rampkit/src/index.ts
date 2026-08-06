@@ -4,7 +4,7 @@
  * No secrets, no Node APIs, no dependencies.
  */
 
-export const RAMPKIT_VERSION = '0.3.0';
+export const RAMPKIT_VERSION = '0.4.0';
 
 export {
     NETWORKS,
@@ -46,6 +46,11 @@ export type {
     CustomerKyc,
     CreatedCustomer,
     KycLaunch,
+    WalletKyc,
+    WalletKycStatus,
+    HostedOnboarding,
+    SpeiDeposit,
+    PixDeposit,
     RampAsset,
     RampDirection,
     RampQuote,

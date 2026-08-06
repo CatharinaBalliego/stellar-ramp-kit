@@ -156,6 +156,14 @@ const { isApproved, kyc, launch } = useKyc();
 // returns; sandbox auto-approves.
 ```
 
+**Migrating from the starter-pack files / zero-setup alternative:** the
+legacy presigned flow is kept as `createHostedOnboarding()` — no issuer
+registration needed, with the documented "see org" 409 recovery built in —
+but it is `@deprecated`: Etherfuse sunsets that endpoint on **2026-08-16**.
+For tests, `sandboxApproveKyc()` (sandbox-only) approves a customer without
+a browser. Wallet-scoped status (`getWalletKycStatus()`) is also available,
+with its own enum (`proposed`, `approved_chain_deploying`, `rejected`).
+
 **One-time platform setup** (per environment, required for `launch`):
 Etherfuse verifies a JWT your server signs, against a JWKS you host.
 

@@ -52,4 +52,10 @@ export type {
     KycRequirement,
     KycStatus,
     KycLaunch,
+    WalletKyc,
+    WalletKycStatus,
+    HostedOnboarding,
+    DepositInstructions,
+    SpeiDeposit,
+    PixDeposit,
 } from '../core/types';

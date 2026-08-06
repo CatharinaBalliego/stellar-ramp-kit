@@ -8,6 +8,7 @@ import { RampkitError } from '../core/errors';
 import type {
     CustomerKyc,
     KycLaunch,
+    WalletKyc,
     PreflightIssue,
     PreflightResult,
     RampAsset,
@@ -61,6 +62,8 @@ export interface RampClient {
     }): Promise<RampQuote>;
     listBankAccounts(): Promise<RampBankAccount[]>;
     getKycStatus(args?: { requirements?: boolean }): Promise<CustomerKyc>;
+    /** Wallet-scoped status — different enum (proposed/approved_chain_deploying/rejected). */
+    getWalletKycStatus(): Promise<WalletKyc>;
     /** Mint a hosted-KYC launch for the session's customer (server signs the JWT). */
     startKycSession(args?: {
         email?: string;
@@ -136,6 +139,7 @@ export function createRampClient(options: CreateRampClientOptions = {}): RampCli
         listBankAccounts: () => call('bankAccounts.list', 'GET'),
         getKycStatus: (args = {}) =>
             call('kyc.status', 'GET', args.requirements ? { requirements: 'true' } : {}),
+        getWalletKycStatus: () => call('kyc.status', 'GET', { wallet: 'true' }),
         startKycSession: (args = {}) => call('kyc.startSession', 'POST', args),
         createOnrampOrder: (args) => call('onramp.createOrder', 'POST', args),
         createOfframpOrder: (args) => call('offramp.createOrder', 'POST', args),

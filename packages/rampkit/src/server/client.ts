@@ -24,9 +24,12 @@ import type {
     CreatedCustomer,
     CustomerKyc,
     DepositInstructions,
+    HostedOnboarding,
     KycLaunch,
     KycRequirement,
     PreflightResult,
+    WalletKyc,
+    WalletKycStatus,
     RampAsset,
     RampBankAccount,
     RampDirection,
@@ -93,6 +96,9 @@ interface WireOrderResponse {
     depositClabe?: string | null;
     depositBankName?: string | null;
     depositAccountHolder?: string | null;
+    depositPixKey?: string | null;
+    depositPixKeyType?: string | null;
+    depositPixCode?: string | null;
     orderType: RampDirection;
     status: RampOrder['status'];
     statusPage?: string | null;
@@ -298,14 +304,19 @@ export class EtherfuseClient {
             ...(args.direction === 'onramp' ? { walletAddress: args.publicKey } : {}),
         });
 
+        const destinationAmount = data.destinationAmountAfterFee ?? data.destinationAmount;
         return {
             id: data.quoteId,
             direction: args.direction,
             sourceAsset: data.quoteAssets.sourceAsset,
             targetAsset: data.quoteAssets.targetAsset,
             sourceAmount: data.sourceAmount,
-            destinationAmount: data.destinationAmountAfterFee ?? data.destinationAmount,
-            exchangeRate: data.exchangeRate,
+            destinationAmount,
+            // Sandbox sometimes omits exchangeRate — derive the fiat-per-token
+            // rate (the wire's convention) from the amounts as a fallback.
+            exchangeRate:
+                data.exchangeRate ||
+                deriveExchangeRate(args.direction, data.sourceAmount, destinationAmount),
             feeAmount: data.feeAmount ?? null,
             feeBps: data.feeBps ?? null,
             expiresAt: data.expiresAt,
@@ -461,6 +472,158 @@ export class EtherfuseClient {
         };
     }
 
+    /**
+     * Wallet-scoped KYC status (`/kyc/{pubkey}`). NOTE: this endpoint speaks
+     * a different enum than {@link getCustomerKyc} — including `proposed`,
+     * `rejected`, and `approved_chain_deploying`.
+     */
+    async getWalletKyc(customerId: string, publicKey: string): Promise<WalletKyc> {
+        const { data } = await this.request<{
+            customerId: string;
+            walletPublicKey: string;
+            status: WalletKycStatus;
+            currentRejectionReason?: string | null;
+            approvedAt?: string | null;
+        }>(
+            'GET',
+            `/ramp/customer/${encodeURIComponent(customerId)}/kyc/${encodeURIComponent(publicKey)}`,
+        );
+        return {
+            customerId: data.customerId,
+            walletPublicKey: data.walletPublicKey,
+            status: data.status,
+            currentRejectionReason: data.currentRejectionReason ?? null,
+            approvedAt: data.approvedAt ?? null,
+        };
+    }
+
+    /**
+     * Hosted onboarding via presigned URL — the zero-setup alternative to
+     * {@link createKycLaunch}: no issuer/JWKS registration needed; the
+     * customer completes KYC + bank registration at the returned URL
+     * (valid 15 minutes).
+     *
+     * @deprecated Upstream sunset **2026-08-16**
+     * (https://docs.etherfuse.com/changelog/deprecations). Kept for
+     * drop-in migration from the starter-pack client; move to
+     * {@link createCustomer} + {@link createKycLaunch} before the sunset.
+     *
+     * The publicKey-already-registered 409 is recovered exactly as the
+     * Etherfuse docs prescribe for this endpoint: reuse the customer id the
+     * response names, and retry — returning a fresh URL for the EXISTING
+     * customer with `recovered: true`.
+     */
+    async createHostedOnboarding(args: {
+        email: string;
+        publicKey: string;
+        displayName?: string;
+        /** Reuse a known id (idempotent); defaults to a fresh UUID. */
+        customerId?: string;
+        bankAccountId?: string;
+    }): Promise<HostedOnboarding> {
+        const request = (customerId: string, bankAccountId: string) =>
+            this.request<{ presigned_url: string }>('POST', '/ramp/onboarding-url', {
+                customerId,
+                bankAccountId,
+                publicKey: args.publicKey,
+                blockchain: 'stellar',
+                userInfo: {
+                    email: args.email,
+                    displayName: args.displayName ?? args.email,
+                },
+            });
+
+        const customerId = args.customerId ?? randomUUID();
+        const bankAccountId = args.bankAccountId ?? randomUUID();
+        try {
+            const { data } = await request(customerId, bankAccountId);
+            return {
+                customerId,
+                bankAccountId,
+                presignedUrl: data.presigned_url,
+                recovered: false,
+            };
+        } catch (error) {
+            if (!(error instanceof EtherfuseApiError) || error.status !== 409) throw error;
+            // "You have already added user with this address, see org: <id>" —
+            // this deprecated endpoint offers no structural recovery; parsing
+            // the id out of the message is the documented procedure for it.
+            const match = /see org:\s*([0-9a-f-]{36})/i.exec(error.message);
+            if (!match) throw error;
+            const existingId = match[1]!;
+            this.emit({ type: 'customer:recovered', customerId: existingId });
+            const retryBankAccountId = randomUUID();
+            const { data } = await request(existingId, retryBankAccountId);
+            return {
+                customerId: existingId,
+                bankAccountId: retryBankAccountId,
+                presignedUrl: data.presigned_url,
+                recovered: true,
+            };
+        }
+    }
+
+    /**
+     * Approve a customer's KYC without a browser. **Sandbox only.**
+     *
+     * Internally: submits programmatic KYC identity data, then accepts the
+     * three legal agreements — each with a FRESH presigned URL (they are
+     * single-use for agreement acceptance). Rides deprecated endpoints
+     * (sunset 2026-08-16); meant for tests and dev automation, never UI.
+     */
+    async sandboxApproveKyc(args: {
+        customerId: string;
+        publicKey: string;
+        email?: string;
+        identity?: Record<string, unknown>;
+    }): Promise<void> {
+        if (this.environment !== 'sandbox') {
+            throw new RampkitError('sandboxApproveKyc is sandbox-only');
+        }
+        const email = args.email ?? `sandbox+${args.customerId.slice(0, 8)}@example.com`;
+
+        await this.request(
+            'POST',
+            `/ramp/customer/${encodeURIComponent(args.customerId)}/kyc`,
+            {
+                pubkey: args.publicKey,
+                identity: args.identity ?? {
+                    name: { givenName: 'Sandbox', familyName: 'Tester' },
+                    dateOfBirth: '1990-01-01',
+                    address: {
+                        street: 'Av. Reforma 1',
+                        city: 'CDMX',
+                        region: 'CDMX',
+                        postalCode: '06600',
+                        country: 'MX',
+                    },
+                    idNumbers: [{ type: 'curp', value: 'XEXX010101HNEXXXA4' }],
+                },
+            },
+        );
+
+        for (const agreement of [
+            'electronic-signature',
+            'terms-and-conditions',
+            'customer-agreement',
+        ]) {
+            const { data } = await this.request<{ presigned_url: string }>(
+                'POST',
+                '/ramp/onboarding-url',
+                {
+                    customerId: args.customerId,
+                    bankAccountId: randomUUID(),
+                    publicKey: args.publicKey,
+                    blockchain: 'stellar',
+                    userInfo: { email, displayName: email },
+                },
+            );
+            await this.request('POST', `/ramp/agreements/${agreement}`, {
+                presignedUrl: data.presigned_url,
+            });
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Orders
     // -----------------------------------------------------------------------
@@ -492,6 +655,9 @@ export class EtherfuseClient {
                     depositClabe?: string;
                     depositBankName?: string;
                     depositAccountHolder?: string;
+                    depositPixKey?: string;
+                    depositPixKeyType?: string;
+                    depositPixCode?: string;
                 };
             }>('POST', '/ramp/order', {
                 orderId,
@@ -509,6 +675,18 @@ export class EtherfuseClient {
                     rail: 'spei',
                     clabe: data.onramp.depositClabe,
                     bankName: data.onramp.depositBankName ?? null,
+                    beneficiary: data.onramp.depositAccountHolder ?? null,
+                    amount: data.onramp.depositAmount ?? null,
+                };
+            } else if (
+                !order.deposit &&
+                (data.onramp.depositPixCode || data.onramp.depositPixKey)
+            ) {
+                order.deposit = {
+                    rail: 'pix',
+                    pixCode: data.onramp.depositPixCode ?? null,
+                    pixKey: data.onramp.depositPixKey ?? null,
+                    pixKeyType: data.onramp.depositPixKeyType ?? null,
                     beneficiary: data.onramp.depositAccountHolder ?? null,
                     amount: data.onramp.depositAmount ?? null,
                 };
@@ -649,16 +827,45 @@ export class EtherfuseClient {
 // Mapping — no fabricated fields: what the wire didn't send is null.
 // ---------------------------------------------------------------------------
 
+/** Fiat per token — the wire's exchangeRate convention for both directions. */
+function deriveExchangeRate(
+    direction: RampDirection,
+    sourceAmount: string,
+    destinationAmount: string,
+): string {
+    const source = Number(sourceAmount);
+    const destination = Number(destinationAmount);
+    const [fiat, token] =
+        direction === 'onramp' ? [source, destination] : [destination, source];
+    if (!Number.isFinite(fiat) || !Number.isFinite(token) || token === 0) return '';
+    return String(fiat / token);
+}
+
+function mapDeposit(w: WireOrderResponse): DepositInstructions | null {
+    if (w.depositClabe) {
+        return {
+            rail: 'spei',
+            clabe: w.depositClabe,
+            bankName: w.depositBankName ?? null,
+            beneficiary: w.depositAccountHolder ?? null,
+            amount: str(w.amountInFiat),
+        };
+    }
+    if (w.depositPixCode || w.depositPixKey) {
+        return {
+            rail: 'pix',
+            pixCode: w.depositPixCode ?? null,
+            pixKey: w.depositPixKey ?? null,
+            pixKeyType: w.depositPixKeyType ?? null,
+            beneficiary: w.depositAccountHolder ?? null,
+            amount: str(w.amountInFiat),
+        };
+    }
+    return null;
+}
+
 function mapOrder(w: WireOrderResponse): RampOrder {
-    const deposit: DepositInstructions | null = w.depositClabe
-        ? {
-              rail: 'spei',
-              clabe: w.depositClabe,
-              bankName: w.depositBankName ?? null,
-              beneficiary: w.depositAccountHolder ?? null,
-              amount: str(w.amountInFiat),
-          }
-        : null;
+    const deposit = mapDeposit(w);
 
     return {
         orderId: w.orderId,

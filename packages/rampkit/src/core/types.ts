@@ -110,7 +110,7 @@ export const TERMINAL_OFFRAMP_STATUSES: readonly OrderStatus[] = [
 ];
 
 /** SPEI deposit instructions for funding an onramp (Mexico). */
-export interface DepositInstructions {
+export interface SpeiDeposit {
     rail: 'spei';
     clabe: string;
     bankName: string | null;
@@ -118,6 +118,22 @@ export interface DepositInstructions {
     /** Exact fiat amount to transfer. */
     amount: string | null;
 }
+
+/**
+ * PIX deposit instructions (Brazil). The PIX fields ride the same order
+ * object; whichever the wire sends is passed through untouched.
+ */
+export interface PixDeposit {
+    rail: 'pix';
+    /** BR-Code / EMV copy-paste string (QR or paste into a banking app). */
+    pixCode: string | null;
+    pixKey: string | null;
+    pixKeyType: string | null;
+    beneficiary: string | null;
+    amount: string | null;
+}
+
+export type DepositInstructions = SpeiDeposit | PixDeposit;
 
 /**
  * Unified order shape for `GET /ramp/order/{id}` (the same object the
@@ -228,6 +244,41 @@ export interface CreatedCustomer {
     /** Wallet registered for the customer, when one was provided. */
     publicKey: string | null;
     /** True when the id already existed (safe signup retry). */
+    recovered: boolean;
+}
+
+/**
+ * Wallet-scoped KYC status (`GET /ramp/customer/{id}/kyc/{pubkey}`). This
+ * endpoint speaks a DIFFERENT enum than the customer-level one:
+ * `approved_chain_deploying` = approved, awaiting on-chain marking (Solana).
+ */
+export type WalletKycStatus =
+    | 'not_started'
+    | 'proposed'
+    | 'approved'
+    | 'approved_chain_deploying'
+    | 'rejected';
+
+export interface WalletKyc {
+    customerId: string;
+    walletPublicKey: string;
+    status: WalletKycStatus;
+    currentRejectionReason: string | null;
+    approvedAt: string | null;
+}
+
+/**
+ * Result of the legacy hosted onboarding (`POST /ramp/onboarding-url`).
+ * DEPRECATED upstream — sunset 2026-08-16. Zero-setup alternative to the
+ * JWT/`/idv` launch until then.
+ */
+export interface HostedOnboarding {
+    customerId: string;
+    bankAccountId: string | null;
+    /** Open in a browser; the customer has 15 minutes to complete it. */
+    presignedUrl: string;
+    /** True when the publicKey was already registered and the documented
+     * "see org" recovery re-used the existing customer. */
     recovered: boolean;
 }
 

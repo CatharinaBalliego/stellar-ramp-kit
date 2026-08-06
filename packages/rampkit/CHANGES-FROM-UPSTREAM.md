@@ -75,6 +75,27 @@ unit tests). The changes below are landed unless marked otherwise.
   transaction is open for signing.
 - `simulateFiatReceived` throws on failure and is refused outside sandbox —
   upstream returned the raw status code and would run against production.
-- Not carried over (out of v0 scope): webhook payload type (upstream's flat
+- KYC status enums, corrected in BOTH directions (v0.4): the customer-level
+  endpoint (`/kyc`) speaks `not_started | in_progress | submitted | approved
+  | denied`; the wallet-level endpoint (`/kyc/{pubkey}`) speaks upstream's
+  `not_started | proposed | approved | approved_chain_deploying | rejected`.
+  Upstream used one enum for both (right for the wallet endpoint, wrong for
+  the customer one); an earlier revision of this file made the inverse
+  mistake. Rampkit models the two endpoints with two types
+  (`CustomerKyc` / `WalletKyc`).
+- PIX deposits (v0.4): the deposit object is a `spei | pix` discriminated
+  union, passing PIX wire fields through untouched — upstream's speculative
+  Brazil handling, kept, without fabricated fields.
+- Hosted presigned onboarding retained as a deprecated migration path
+  (v0.4): `createHostedOnboarding()` mirrors upstream's flow — including the
+  documented "see org" 409 recovery, which retries with the EXISTING
+  customer id instead of silently swallowing parse failures. Marked
+  `@deprecated`, sunset 2026-08-16.
+- `sandboxApproveKyc()` (v0.4, sandbox-only): browserless KYC approval for
+  tests — programmatic identity submission plus the three agreement
+  acceptances, each with a fresh presigned URL (they are single-use).
+- Quote `exchangeRate` falls back to the derived fiat-per-token rate when
+  the sandbox omits it (v0.4).
+- Not carried over (out of scope): webhook payload type (upstream's flat
   `{event, data}` shape does not match real tagged deliveries — document
-  only), KYC status enum fix, anchor mode, embedded wallets, swaps.
+  only), anchor mode, embedded wallets, swaps.

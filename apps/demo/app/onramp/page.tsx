@@ -70,14 +70,27 @@ export default function OnrampPage() {
             </Section>
 
             {deposit && (
-                <Section title="3 · Pay the SPEI deposit">
-                    <p>
-                        CLABE: <code>{deposit.clabe}</code>
-                        <br />
-                        Bank: {deposit.bankName} · Beneficiary: {deposit.beneficiary}
-                        <br />
-                        Amount: <b>{deposit.amount} MXN</b>
-                    </p>
+                <Section
+                    title={`3 · Pay the ${deposit.rail === 'spei' ? 'SPEI' : 'PIX'} deposit`}
+                >
+                    {deposit.rail === 'spei' ? (
+                        <p>
+                            CLABE: <code>{deposit.clabe}</code>
+                            <br />
+                            Bank: {deposit.bankName} · Beneficiary: {deposit.beneficiary}
+                            <br />
+                            Amount: <b>{deposit.amount} MXN</b>
+                        </p>
+                    ) : (
+                        <p>
+                            PIX code: <code>{deposit.pixCode ?? deposit.pixKey}</code>
+                            {deposit.pixKeyType ? ` (${deposit.pixKeyType})` : null}
+                            <br />
+                            Beneficiary: {deposit.beneficiary}
+                            <br />
+                            Amount: <b>{deposit.amount}</b>
+                        </p>
+                    )}
                     <button onClick={() => void actions.simulateDeposit()}>
                         Simulate deposit (sandbox)
                     </button>

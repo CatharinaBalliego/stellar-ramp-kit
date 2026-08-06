@@ -118,9 +118,11 @@ export const RAMP_OPERATIONS = {
         method: 'GET',
         scope: 'customer',
         execute: async (client, session, params) =>
-            client.getCustomerKyc(session!.customerId, {
-                requirements: params['requirements'] === 'true',
-            }),
+            params['wallet'] === 'true'
+                ? client.getWalletKyc(session!.customerId, session!.publicKey)
+                : client.getCustomerKyc(session!.customerId, {
+                      requirements: params['requirements'] === 'true',
+                  }),
     },
 
     'kyc.startSession': {
