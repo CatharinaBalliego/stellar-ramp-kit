@@ -4,7 +4,7 @@
     "bin": {
         "rampkit": "./dist/cli.js"
     },
-    "description": "Etherfuse ramp kit for Stellar — onramp/offramp with a wallet-agnostic signer. Community package, not official.",
+    "description": "Etherfuse ramp kit for Stellar — MXN (SPEI) and BRL (PIX) onramp/offramp with a wallet-agnostic signer. Community package, not official.",
     "repository": {
         "type": "git",
         "url": "git+https://github.com/CatharinaBalliego/stellar-ramp-kit.git",
@@ -112,6 +112,9 @@
         "ramp",
         "fiat",
         "cetes",
-        "spei"
+        "spei",
+        "pix",
+        "mxn",
+        "brl"
     ]
 }

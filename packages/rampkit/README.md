@@ -1,15 +1,17 @@
 # Rampkit — Etherfuse ramp kit for Stellar (community package, not official)
 
-Fiat on/off-ramps on Stellar (SPEI ⇄ stablebonds like CETES) via the
-[Etherfuse](https://etherfuse.com) ramp API — as an installable package
-instead of files you copy: a server route handler, a browser client, React
-hooks with full flow state machines, and a wallet-agnostic signer contract.
+Fiat on/off-ramps on Stellar — **MXN via SPEI** and **BRL via PIX** ⇄
+stablebonds like CETES — via the [Etherfuse](https://etherfuse.com) ramp
+API, as an installable package instead of files you copy: a server route
+handler, a browser client, React hooks with full flow state machines, and a
+wallet-agnostic signer contract.
 
 ## What you get
 
-- **Onramp** (fiat → tokens): quote → order → SPEI deposit instructions →
-  delivery, including the claimable-balance flow for first-time wallets
-  (sign one claim transaction to add the trustline and receive tokens).
+- **Onramp** (fiat → tokens): quote → order → deposit instructions (SPEI
+  CLABE or PIX code/key — a typed `spei | pix` union) → delivery, including
+  the claimable-balance flow for first-time wallets (sign one claim
+  transaction to add the trustline and receive tokens).
 - **Offramp** (tokens → fiat): quote → **wallet preflight** → order → sign
   the prebuilt burn transaction → payout tracking to `finalized`.
 - **Expiry handled for you**: Etherfuse XDRs live ~1–2 minutes; the hooks
@@ -25,10 +27,11 @@ hooks with full flow state machines, and a wallet-agnostic signer contract.
 - Node **≥ 18.17** (server side).
 - An Etherfuse account with an API key
   ([sandbox](https://sandbox.etherfuse.com) is self-serve and free).
-- An **approved customer** (`customerId`) with a registered bank account.
-  Customer onboarding/KYC is out of scope for v0 — do it via the Etherfuse
-  dashboard or API ([docs](https://docs.etherfuse.com/guides/onboarding));
-  Rampkit takes over from there.
+- Each end user ramps as their own **approved Etherfuse customer**
+  (`customerId`) with a registered bank account — and Rampkit ships that
+  whole journey in-app: customer creation at signup (`createCustomer` /
+  the `customer.create` operation) and hosted KYC (`useKyc().launch`). See
+  [Onboarding users inside your app](#onboarding-users-inside-your-app-v03).
 
 ## Try it in 2 minutes (sandbox bootstrap)
 
@@ -114,7 +117,7 @@ export function App({ children }) {
 ```tsx
 import { useOfframp, useOnramp, useRampAssets } from '@spacecathy/rampkit/react';
 
-const { assets } = useRampAssets({ currency: 'MXN' }); // via GET /ramp/assets
+const { assets } = useRampAssets({ currency: 'MXN' }); // or 'BRL' — via GET /ramp/assets
 
 const { phase, quote, burnXdr, preflightIssues, txHash, actions } = useOfframp();
 // actions.requestQuote({ asset: 'CETES', fiat: 'MXN', amount: '5' });
@@ -124,8 +127,8 @@ const { phase, quote, burnXdr, preflightIssues, txHash, actions } = useOfframp()
 // actions.resume(orderId);            ← re-enter after refresh/crash
 
 const onramp = useOnramp();
-// requestQuote → start → deposit (SPEI CLABE) → [simulateDeposit in
-// sandbox] → signClaim (first-time wallets) → completed
+// requestQuote → start → deposit (SPEI CLABE or PIX code, by rail) →
+// [simulateDeposit in sandbox] → signClaim (first-time wallets) → completed
 ```
 
 `phase` walks an explicit state machine (`quote_ready`, `awaiting_transaction`,
@@ -259,13 +262,15 @@ infinite spinner.
   at runtime via `GET /ramp/assets`, never hardcoded.
 - Unfunded orders auto-cancel after 24h server-side → recovery is resume-only;
   there is no cancel operation.
-- Sandbox: onramps are capped at 500 MXN and funded via
+- Sandbox: MXN onramps are capped at 500 MXN; deposits are funded via
   `sandbox.simulateDeposit` (hidden in production).
 
 ## Scope
 
-Etherfuse only, Stellar only, default burn flow. In since v0.3: in-app
-onboarding (customer creation + hosted-KYC launch). Out of scope: anchor
+Etherfuse only, Stellar only, default burn flow, MXN/SPEI and BRL/PIX
+rails. In since v0.3: in-app onboarding (customer creation + hosted-KYC
+launch; since v0.5 also exposed as the `customer.create` handler
+operation). Out of scope: anchor
 mode, embedded wallets, swaps, webhooks (polling covers freshness; a
 WebSocket source is planned behind the same `TransactionSource` interface).
 
