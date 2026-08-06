@@ -37,32 +37,31 @@ No real money is involved anywhere below.
    [sandbox.etherfuse.com](https://sandbox.etherfuse.com), open the KYB page
    and click **Approve KYB** (sandbox lets you approve yourself, no
    documents), then generate an API key (`api_sand_…`).
-2. **Customer** — create a personal customer and complete its KYC from the
-   dashboard. Sandbox auto-approves; any document images work. The one
-   exception: choosing **Mexico** requires a Constancia de Situación Fiscal
-   at the tax step — use
-   [Etherfuse's example file](https://stablebonds.s3.us-west-2.amazonaws.com/example-constancia-de-situacion-fiscal.pdf).
-   Note the **customer id** (UUID).
-3. **Bank account** — register one for that customer via the dashboard's
-   hosted flow (in sandbox it auto-uses the placeholder RFC and becomes
-   `active` immediately).
-4. **Wallet** — any Stellar **testnet** keypair (generate one in
-   [Stellar Lab](https://lab.stellar.org)) and fund it with
-   [Friendbot](https://lab.stellar.org/account/fund). Use its `G…` address
-   as the customer's wallet. To test the **offramp** the wallet must hold
-   CETES — there is no faucet: run an **onramp** in the demo first (≤ 500
-   MXN, sandbox cap) and sign the claim; that also creates the trustline.
+2. **Everything else is scripted** (same flow as
+   `npx @spacecathy/rampkit setup-sandbox`, which package consumers use):
 
-### 2 · Configure and run
+   ```bash
+   cp apps/demo/.env.local.example apps/demo/.env.local
+   # paste your ETHERFUSE_API_KEY into it, then:
+   node scripts/bootstrap-sandbox.mjs you@email.com
+   ```
+
+   The script creates the customer and a funded testnet wallet, hands you
+   the hosted-onboarding link (one browser click-through: KYC + bank
+   account — sandbox auto-approves; **Mexico** requires
+   [this example Constancia](https://stablebonds.s3.us-west-2.amazonaws.com/example-constancia-de-situacion-fiscal.pdf)
+   at the tax step), verifies approval, and **writes `.env.local` for you**.
+
+### 2 · Run
 
 ```bash
-cp apps/demo/.env.local.example apps/demo/.env.local
-# fill in: ETHERFUSE_API_KEY, DEMO_CUSTOMER_ID, DEMO_PUBLIC_KEY,
-#          NEXT_PUBLIC_DEMO_WALLET_SECRET (testnet secret — demo only!)
-
 npm run dev -w apps/demo
 # → http://localhost:3000  (home page shows an environment check)
 ```
+
+To test the **offramp** the wallet must hold CETES — there is no faucet:
+run an **onramp** first (≤ 500 MXN sandbox cap, "Simulate deposit", then
+"Sign claim"); that also creates the trustline.
 
 Onramp flow: quote → create order → SPEI CLABE → **Simulate deposit**
 (sandbox button) → claim tokens (first-time wallets). Offramp flow: quote →

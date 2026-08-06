@@ -30,6 +30,27 @@ hooks with full flow state machines, and a wallet-agnostic signer contract.
   dashboard or API ([docs](https://docs.etherfuse.com/guides/onboarding));
   Rampkit takes over from there.
 
+## Try it in 2 minutes (sandbox bootstrap)
+
+You don't need to touch the Etherfuse dashboard to get a testable identity.
+With a sandbox API key in hand ([sandbox.etherfuse.com](https://sandbox.etherfuse.com):
+create account → Approve KYB → API key):
+
+```bash
+export ETHERFUSE_API_KEY=api_sand_...        # PowerShell: $env:ETHERFUSE_API_KEY="..."
+npx @spacecathy/rampkit setup-sandbox you@email.com
+```
+
+The CLI creates a customer, generates and funds a Stellar testnet wallet,
+and hands you ONE hosted link where you click through KYC + bank
+registration (sandbox auto-approves). It then prints the `customerId` /
+`publicKey` / wallet secret your app's `getSession` needs — or writes them
+with `--write .env.local`.
+
+> The bootstrap rides an Etherfuse endpoint deprecated with sunset
+> 2026-08-16; after that date use the dashboard/JWT onboarding instead. The
+> runtime library never touches that endpoint.
+
 ## Quickstart
 
 ```bash
@@ -110,6 +131,25 @@ const onramp = useOnramp();
 `phase` walks an explicit state machine (`quote_ready`, `awaiting_transaction`,
 `transaction_ready`, `regenerating`, `preflight_failed`, …) so your UI can
 render every step, including expiry and regeneration, without guessing.
+
+## Where do `customerId`s live? (not in env vars!)
+
+One `customerId` per **end user** of your platform — it's their verified
+Etherfuse identity (fiat is regulated; each person KYCs once, exactly like a
+`stripe_customer_id`). It lives **in your database**, next to your user
+record, and flows per request through `getSession`:
+
+```
+user signs up      →  your backend creates their customer (one API call,
+                      you generate the UUID) and stores it: users.etherfuse_customer_id
+first ramp usage   →  the user completes Etherfuse's hosted KYC once
+ever after         →  getSession(req) returns { customerId, publicKey }
+                      from YOUR session/DB — fully automatic
+```
+
+The `DEMO_CUSTOMER_ID` env var you'll see in the demo app exists only
+because the demo has no auth or database — it fakes a one-user platform.
+Real integrations never configure customer ids by hand.
 
 ## Why the offramp preflight matters
 

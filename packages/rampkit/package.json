@@ -1,7 +1,15 @@
 {
     "name": "@spacecathy/rampkit",
-    "version": "0.1.0",
+    "version": "0.2.0",
+    "bin": {
+        "rampkit": "./dist/cli.js"
+    },
     "description": "Etherfuse ramp kit for Stellar — onramp/offramp with a wallet-agnostic signer. Community package, not official.",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/CatharinaBalliego/stellar-ramp-kit.git",
+        "directory": "packages/rampkit"
+    },
     "license": "Apache-2.0",
     "type": "module",
     "sideEffects": false,
@@ -82,6 +90,7 @@
         }
     },
     "devDependencies": {
+        "@stellar/stellar-sdk": "^13.0.0",
         "@types/node": "^22.5.0",
         "@types/react": "^19.0.0",
         "react": "^19.0.0",

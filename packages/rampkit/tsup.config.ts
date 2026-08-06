@@ -20,4 +20,11 @@ export default defineConfig([
         // React client components: the directive must survive bundling.
         banner: { js: '"use client";' },
     },
+    {
+        ...shared,
+        entry: { cli: 'src/cli.ts' },
+        format: ['esm'],
+        dts: false,
+        banner: { js: '#!/usr/bin/env node' },
+    },
 ]);
