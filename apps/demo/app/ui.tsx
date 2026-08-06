@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { useRampClient } from '@seu-escopo/rampkit/react';
-import type { RampBankAccount } from '@seu-escopo/rampkit';
+import { useRampClient } from '@spacecathy/rampkit/react';
+import type { RampBankAccount } from '@spacecathy/rampkit';
 
 export function Section(props: { title: string; children: ReactNode }) {
     return (

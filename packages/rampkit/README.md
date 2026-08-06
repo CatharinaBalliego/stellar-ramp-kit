@@ -5,8 +5,6 @@ Fiat on/off-ramps on Stellar (SPEI ⇄ stablebonds like CETES) via the
 instead of files you copy: a server route handler, a browser client, React
 hooks with full flow state machines, and a wallet-agnostic signer contract.
 
-> `@seu-escopo` is a placeholder scope — it changes at first publish.
-
 ## What you get
 
 - **Onramp** (fiat → tokens): quote → order → SPEI deposit instructions →
@@ -35,7 +33,7 @@ hooks with full flow state machines, and a wallet-agnostic signer contract.
 ## Quickstart
 
 ```bash
-npm install @seu-escopo/rampkit
+npm install @spacecathy/rampkit
 ```
 
 **1 · Mount the server handler** (the only place the API key exists):
@@ -43,7 +41,7 @@ npm install @seu-escopo/rampkit
 ```ts
 // app/api/ramp/[...op]/route.ts  (Next.js App Router — any Request/Response
 // framework works; Express via toNodeHandler)
-import { EtherfuseClient, createRampHandler } from '@seu-escopo/rampkit/server';
+import { EtherfuseClient, createRampHandler } from '@spacecathy/rampkit/server';
 
 const client = new EtherfuseClient({
     apiKey: process.env.ETHERFUSE_API_KEY!, // api_sand_… or api_prod_…
@@ -69,8 +67,8 @@ export const POST = handler;
 
 ```tsx
 'use client';
-import { createRampClient } from '@seu-escopo/rampkit/client';
-import { RampProvider, type RampSigner } from '@seu-escopo/rampkit/react';
+import { createRampClient } from '@spacecathy/rampkit/client';
+import { RampProvider, type RampSigner } from '@spacecathy/rampkit/react';
 
 const client = createRampClient(); // talks to /api/ramp, carries no secrets
 
@@ -93,7 +91,7 @@ export function App({ children }) {
 **3 · Use the flow hooks:**
 
 ```tsx
-import { useOfframp, useOnramp, useRampAssets } from '@seu-escopo/rampkit/react';
+import { useOfframp, useOnramp, useRampAssets } from '@spacecathy/rampkit/react';
 
 const { assets } = useRampAssets({ currency: 'MXN' }); // via GET /ramp/assets
 

@@ -1,5 +1,5 @@
 {
-    "name": "@seu-escopo/rampkit",
+    "name": "@spacecathy/rampkit",
     "version": "0.1.0",
     "description": "Etherfuse ramp kit for Stellar — onramp/offramp with a wallet-agnostic signer. Community package, not official.",
     "license": "Apache-2.0",

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useOnramp, useRampAssets } from '@seu-escopo/rampkit/react';
+import { useOnramp, useRampAssets } from '@spacecathy/rampkit/react';
 import { BankAccountPicker, ErrorLine, Phase, Section } from '../ui';
 
 export default function OnrampPage() {

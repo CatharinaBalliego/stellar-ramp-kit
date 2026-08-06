@@ -1,8 +1,8 @@
 'use client';
 
 import { useMemo, type ReactNode } from 'react';
-import { createRampClient } from '@seu-escopo/rampkit/client';
-import { RampProvider, type RampSigner } from '@seu-escopo/rampkit/react';
+import { createRampClient } from '@spacecathy/rampkit/client';
+import { RampProvider, type RampSigner } from '@spacecathy/rampkit/react';
 import { Keypair, TransactionBuilder } from '@stellar/stellar-sdk';
 
 /**

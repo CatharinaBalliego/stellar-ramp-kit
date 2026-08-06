@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRampClient, useRampSigner } from '@seu-escopo/rampkit/react';
-import type { RampBankAccount, RampPublicConfig } from '@seu-escopo/rampkit';
+import { useRampClient, useRampSigner } from '@spacecathy/rampkit/react';
+import type { RampBankAccount, RampPublicConfig } from '@spacecathy/rampkit';
 
 export default function Home() {
     const client = useRampClient();

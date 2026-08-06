@@ -2,7 +2,7 @@ import {
     EtherfuseClient,
     createRampHandler,
     type GetSession,
-} from '@seu-escopo/rampkit/server';
+} from '@spacecathy/rampkit/server';
 
 /**
  * Demo session: a fixed customer from env. rampkit v0 starts from an
