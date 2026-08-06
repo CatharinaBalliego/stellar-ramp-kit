@@ -1,0 +1,13 @@
+{
+    "name": "stellar-bounty-workspace",
+    "private": true,
+    "workspaces": [
+        "packages/*",
+        "apps/*"
+    ],
+    "scripts": {
+        "build": "npm run build -w packages/rampkit",
+        "typecheck": "npm run typecheck -w packages/rampkit",
+        "test": "npm run test -w packages/rampkit"
+    }
+}

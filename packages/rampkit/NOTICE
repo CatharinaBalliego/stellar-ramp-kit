@@ -1,0 +1,20 @@
+Rampkit — Etherfuse ramp kit for Stellar
+Copyright 2026 Rampkit contributors
+
+This product is derived from the Etherfuse anchor integration in the
+Stellar Regional Starter Pack by Elliot Friend:
+
+    https://github.com/ElliotFriend/regional-starter-pack
+
+Copyright Elliot Friend
+Licensed under the Apache License, Version 2.0, as declared in that
+repository's README (reference commit: ae9d8f4; the repository ships no
+LICENSE or NOTICE file of its own).
+
+The derived material is the Etherfuse API client and its type definitions
+(upstream paths: src/lib/anchors/etherfuse/client.ts, types.ts, index.ts).
+Modifications made in this package are summarized in
+CHANGES-FROM-UPSTREAM.md, distributed alongside this file.
+
+This package is a community project. It is not affiliated with, or
+endorsed by, Etherfuse or the Stellar Development Foundation.

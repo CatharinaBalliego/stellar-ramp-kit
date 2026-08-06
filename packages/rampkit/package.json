@@ -1,0 +1,108 @@
+{
+    "name": "@seu-escopo/rampkit",
+    "version": "0.1.0",
+    "description": "Etherfuse ramp kit for Stellar — onramp/offramp with a wallet-agnostic signer. Community package, not official.",
+    "license": "Apache-2.0",
+    "type": "module",
+    "sideEffects": false,
+    "engines": {
+        "node": ">=18.17"
+    },
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": {
+                "types": "./dist/index.d.ts",
+                "default": "./dist/index.js"
+            },
+            "require": {
+                "types": "./dist/index.d.cts",
+                "default": "./dist/index.cjs"
+            }
+        },
+        "./server": {
+            "node": {
+                "import": {
+                    "types": "./dist/server/index.d.ts",
+                    "default": "./dist/server/index.js"
+                },
+                "require": {
+                    "types": "./dist/server/index.d.cts",
+                    "default": "./dist/server/index.cjs"
+                }
+            },
+            "types": "./dist/server/index.d.ts"
+        },
+        "./client": {
+            "import": {
+                "types": "./dist/client/index.d.ts",
+                "default": "./dist/client/index.js"
+            },
+            "require": {
+                "types": "./dist/client/index.d.cts",
+                "default": "./dist/client/index.cjs"
+            }
+        },
+        "./react": {
+            "import": {
+                "types": "./dist/react/index.d.ts",
+                "default": "./dist/react/index.js"
+            },
+            "require": {
+                "types": "./dist/react/index.d.cts",
+                "default": "./dist/react/index.cjs"
+            }
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "NOTICE",
+        "CHANGES-FROM-UPSTREAM.md"
+    ],
+    "scripts": {
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+    },
+    "peerDependencies": {
+        "@stellar/stellar-sdk": ">=12",
+        "react": ">=18"
+    },
+    "peerDependenciesMeta": {
+        "@stellar/stellar-sdk": {
+            "optional": true
+        },
+        "react": {
+            "optional": true
+        }
+    },
+    "devDependencies": {
+        "@types/node": "^22.5.0",
+        "@types/react": "^19.0.0",
+        "react": "^19.0.0",
+        "tsup": "^8.3.0",
+        "typescript": "^5.6.0",
+        "vitest": "^2.1.0"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "contributors": [
+        "Elliot Friend (original Etherfuse client — https://github.com/ElliotFriend/regional-starter-pack)"
+    ],
+    "keywords": [
+        "stellar",
+        "etherfuse",
+        "onramp",
+        "offramp",
+        "ramp",
+        "fiat",
+        "cetes",
+        "spei"
+    ]
+}
