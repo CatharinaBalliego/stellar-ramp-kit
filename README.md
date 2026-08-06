@@ -6,7 +6,13 @@ installable npm package: server route handler, browser client, React hooks,
 wallet-agnostic signer. Assets are discovered at runtime via
 `GET /ramp/assets` — never hardcoded.
 
-**→ The package (and its full README) lives in
+```bash
+npm install @spacecathy/rampkit
+```
+
+**→ Published on npm as
+[`@spacecathy/rampkit`](https://www.npmjs.com/package/@spacecathy/rampkit);
+the package source (and its full README) lives in
 [`packages/rampkit`](./packages/rampkit/README.md).** This file covers the
 repo itself: layout, development, and how to run the demo against the
 Etherfuse sandbox.
