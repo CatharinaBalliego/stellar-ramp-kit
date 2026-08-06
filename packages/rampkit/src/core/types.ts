@@ -268,6 +268,22 @@ export interface WalletKyc {
 }
 
 /**
+ * Result of `sandboxApproveKyc`. Read `status` from here — an immediate
+ * `GET /kyc/{pubkey}` after approval can lag behind and still report the
+ * previous value.
+ */
+export interface SandboxKycApproval {
+    /**
+     * False when the identity submit was rejected (typically: the customer
+     * is already approved) and only the agreement acceptances ran — the
+     * retroactive-recovery case.
+     */
+    submitted: boolean;
+    /** Status straight from the submit response; null when not submitted. */
+    status: WalletKycStatus | null;
+}
+
+/**
  * Result of the legacy hosted onboarding (`POST /ramp/onboarding-url`).
  * DEPRECATED upstream — sunset 2026-08-16. Zero-setup alternative to the
  * JWT/`/idv` launch until then.
@@ -324,6 +340,7 @@ export interface TransactionSource {
 
 export type RampOperation =
     | 'config.get'
+    | 'customer.create'
     | 'assets.list'
     | 'quote.create'
     | 'bankAccounts.list'

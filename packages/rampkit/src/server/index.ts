@@ -54,6 +54,7 @@ export type {
     KycLaunch,
     WalletKyc,
     WalletKycStatus,
+    SandboxKycApproval,
     HostedOnboarding,
     DepositInstructions,
     SpeiDeposit,

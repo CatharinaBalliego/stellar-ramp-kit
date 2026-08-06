@@ -39,6 +39,7 @@ import type {
     RampPublicConfig,
     RampQuote,
     RegenerateResult,
+    SandboxKycApproval,
 } from '../core/types';
 import { signUserJwt, type OnboardingConfig } from './onboarding';
 
@@ -300,8 +301,11 @@ export class EtherfuseClient {
             // The API expects a JSON string; number inputs leak from UIs.
             sourceAmount: String(args.amount),
             // Onramp only: lets the quote price one-time account/trustline
-            // onboarding for new wallets (claimable-balance flow).
-            ...(args.direction === 'onramp' ? { walletAddress: args.publicKey } : {}),
+            // onboarding for new wallets (claimable-balance flow). Omitted
+            // when empty — an empty string is not a wallet.
+            ...(args.direction === 'onramp' && args.publicKey
+                ? { walletAddress: args.publicKey }
+                : {}),
         });
 
         const destinationAmount = data.destinationAmountAfterFee ?? data.destinationAmount;
@@ -442,8 +446,14 @@ export class EtherfuseClient {
         name: string;
         /** Send the user back to your app afterwards. */
         returnUrl?: string;
-        /** `'es'` renders the whole flow in Spanish. */
-        lang?: string;
+        /**
+         * `/idv` UI language. Etherfuse documents exactly two values:
+         * `'es'` (Spanish — all UI text, scan prompts, errors, status
+         * screens) and `'en'` (English, also the default when omitted) —
+         * https://docs.etherfuse.com/guides/user-launch-flows. `'pt'` is
+         * NOT documented; other values are passed through untested.
+         */
+        lang?: 'es' | 'en' | (string & {});
     }): KycLaunch {
         if (!this.onboarding) {
             throw new RampkitError(
@@ -520,6 +530,13 @@ export class EtherfuseClient {
         /** Reuse a known id (idempotent); defaults to a fresh UUID. */
         customerId?: string;
         bankAccountId?: string;
+        /**
+         * On the "see org" recovery, reuse the recovered customer's FIRST
+         * registered bank account instead of minting a new `bankAccountId`
+         * — parity with upstream's behavior. Falls back to a fresh id when
+         * the customer has no accounts yet.
+         */
+        reuseExistingBankAccount?: boolean;
     }): Promise<HostedOnboarding> {
         const request = (customerId: string, bankAccountId: string) =>
             this.request<{ presigned_url: string }>('POST', '/ramp/onboarding-url', {
@@ -552,7 +569,12 @@ export class EtherfuseClient {
             if (!match) throw error;
             const existingId = match[1]!;
             this.emit({ type: 'customer:recovered', customerId: existingId });
-            const retryBankAccountId = randomUUID();
+            let retryBankAccountId: string | undefined;
+            if (args.reuseExistingBankAccount) {
+                const accounts = await this.listBankAccounts(existingId);
+                retryBankAccountId = accounts[0]?.id;
+            }
+            retryBankAccountId ??= randomUUID();
             const { data } = await request(existingId, retryBankAccountId);
             return {
                 customerId: existingId,
@@ -570,37 +592,52 @@ export class EtherfuseClient {
      * three legal agreements — each with a FRESH presigned URL (they are
      * single-use for agreement acceptance). Rides deprecated endpoints
      * (sunset 2026-08-16); meant for tests and dev automation, never UI.
+     *
+     * The identity submit is best-effort: when Etherfuse rejects it (the
+     * customer is already approved — the retry-the-agreements case), the
+     * three agreements still run. Read the returned `status` instead of an
+     * immediate `GET /kyc/{pubkey}`, which can lag behind the approval.
      */
     async sandboxApproveKyc(args: {
         customerId: string;
         publicKey: string;
         email?: string;
         identity?: Record<string, unknown>;
-    }): Promise<void> {
+    }): Promise<SandboxKycApproval> {
         if (this.environment !== 'sandbox') {
             throw new RampkitError('sandboxApproveKyc is sandbox-only');
         }
         const email = args.email ?? `sandbox+${args.customerId.slice(0, 8)}@example.com`;
 
-        await this.request(
-            'POST',
-            `/ramp/customer/${encodeURIComponent(args.customerId)}/kyc`,
-            {
-                pubkey: args.publicKey,
-                identity: args.identity ?? {
-                    name: { givenName: 'Sandbox', familyName: 'Tester' },
-                    dateOfBirth: '1990-01-01',
-                    address: {
-                        street: 'Av. Reforma 1',
-                        city: 'CDMX',
-                        region: 'CDMX',
-                        postalCode: '06600',
-                        country: 'MX',
+        let submitted = false;
+        let status: WalletKycStatus | null = null;
+        try {
+            const { data } = await this.request<{ status?: WalletKycStatus } | null>(
+                'POST',
+                `/ramp/customer/${encodeURIComponent(args.customerId)}/kyc`,
+                {
+                    pubkey: args.publicKey,
+                    identity: args.identity ?? {
+                        name: { givenName: 'Sandbox', familyName: 'Tester' },
+                        dateOfBirth: '1990-01-01',
+                        address: {
+                            street: 'Av. Reforma 1',
+                            city: 'CDMX',
+                            region: 'CDMX',
+                            postalCode: '06600',
+                            country: 'MX',
+                        },
+                        idNumbers: [{ type: 'curp', value: 'XEXX010101HNEXXXA4' }],
                     },
-                    idNumbers: [{ type: 'curp', value: 'XEXX010101HNEXXXA4' }],
                 },
-            },
-        );
+            );
+            submitted = true;
+            status = data?.status ?? null;
+        } catch (error) {
+            // Best-effort: an API rejection (already approved) must not stop
+            // the agreements. Anything else (network, bad key…) still throws.
+            if (!(error instanceof EtherfuseApiError)) throw error;
+        }
 
         for (const agreement of [
             'electronic-signature',
@@ -622,6 +659,8 @@ export class EtherfuseClient {
                 presignedUrl: data.presigned_url,
             });
         }
+
+        return { submitted, status };
     }
 
     // -----------------------------------------------------------------------

@@ -146,6 +146,34 @@ const { customerId } = await client.createCustomer({
 await db.users.update(user.id, { etherfuseCustomerId: customerId });
 ```
 
+Or, if the route handler is your only backend surface, expose signup as the
+`customer.create` operation (v0.5) — no custom route needed. Sessions
+without an Etherfuse identity yet may call ONLY this operation; identity
+(email, wallet) still comes from your `getSession`, and the browser can
+never choose the `customerId`:
+
+```ts
+const handler = createRampHandler({
+    client,
+    getSession: async (request) => {
+        const user = await yourAuth(request);
+        if (!user) return null;
+        return {
+            customerId: user.etherfuseCustomerId ?? undefined, // absent pre-signup
+            publicKey: user.stellarAddress ?? undefined,
+            email: user.email,
+            name: user.name,
+        };
+    },
+    // Persist the id — the browser response must never be the only copy.
+    onCustomerCreated: async ({ request, customer }) => {
+        const user = await yourAuth(request);
+        await db.users.update(user!.id, { etherfuseCustomerId: customer.customerId });
+    },
+});
+// Browser side: await client.createCustomer();
+```
+
 ```tsx
 // 2 · In the app: gate on KYC and launch the hosted flow when needed
 import { useKyc } from '@spacecathy/rampkit/react';
@@ -161,14 +189,18 @@ legacy presigned flow is kept as `createHostedOnboarding()` — no issuer
 registration needed, with the documented "see org" 409 recovery built in —
 but it is `@deprecated`: Etherfuse sunsets that endpoint on **2026-08-16**.
 For tests, `sandboxApproveKyc()` (sandbox-only) approves a customer without
-a browser. Wallet-scoped status (`getWalletKycStatus()`) is also available,
-with its own enum (`proposed`, `approved_chain_deploying`, `rejected`).
+a browser — read the status it RETURNS (straight from the submit response;
+an immediate GET can lag), and it's safe to re-run on an already-approved
+customer to retry just the agreements. Wallet-scoped status
+(`getWalletKycStatus()`) is also available, with its own enum (`proposed`,
+`approved_chain_deploying`, `rejected`).
 
 **One-time platform setup** (per environment, required for `launch`):
 Etherfuse verifies a JWT your server signs, against a JWKS you host.
 
-1. Generate an RSA keypair:
-   `openssl genrsa -out private.pem 2048`
+1. Generate the keypair — `npx @spacecathy/rampkit keygen` writes the
+   private key to a file and prints the JWKS + this checklist filled in
+   (or do it yourself: `openssl genrsa -out private.pem 2048`).
 2. Serve the JWKS — mount `createJwksHandler({ privateKey, keyId })` at a
    stable HTTPS URL (e.g. `/.well-known/jwks.json`).
 3. Send your **issuer** and **JWKS URL** to your Etherfuse representative —

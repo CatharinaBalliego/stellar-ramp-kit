@@ -2,7 +2,11 @@ import { createVerify, generateKeyPairSync } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { EtherfuseClient } from '../src/server/client';
 import { createJwks, createJwksHandler, signUserJwt } from '../src/server/onboarding';
+import { RampkitError } from '../src/core/errors';
 import { mockFetch, type Route } from './helpers';
+
+const sandboxClient = (routes: Route[]) =>
+    new EtherfuseClient({ apiKey: 'api_sand_t', fetch: mockFetch(routes) });
 
 let privateKey: string;
 let publicKeyPem: string;
@@ -230,5 +234,240 @@ describe('kyc operations via the handler', () => {
         const payload = decode(body.fields.assertion.split('.')[1]!);
         expect(payload['sub']).toBe('c-1');
         expect(payload['email']).toBe('ana@example.com');
+    });
+});
+
+describe('wallet-scoped KYC status (different enum than customer-level)', () => {
+    it('passes through proposed / approved_chain_deploying / rejected', async () => {
+        const client = sandboxClient([
+            {
+                method: 'GET',
+                path: '/ramp/customer/c-1/kyc/GANA',
+                respond: {
+                    status: 200,
+                    body: {
+                        customerId: 'c-1',
+                        walletPublicKey: 'GANA',
+                        status: 'approved_chain_deploying',
+                    },
+                },
+            },
+        ]);
+        const kyc = await client.getWalletKyc('c-1', 'GANA');
+        expect(kyc.status).toBe('approved_chain_deploying');
+        expect(kyc.walletPublicKey).toBe('GANA');
+    });
+});
+
+describe('createHostedOnboarding (deprecated presigned flow)', () => {
+    it('returns the presigned URL for a fresh customer', async () => {
+        const route: Route = {
+            method: 'POST',
+            path: '/ramp/onboarding-url',
+            respond: { status: 200, body: { presigned_url: 'https://sandbox.etherfuse.com/x' } },
+        };
+        const result = await sandboxClient([route]).createHostedOnboarding({
+            email: 'ana@example.com',
+            publicKey: 'GANA',
+        });
+        expect(result.presignedUrl).toBe('https://sandbox.etherfuse.com/x');
+        expect(result.recovered).toBe(false);
+        const sent = route.calls![0]!.body as Record<string, unknown>;
+        expect(sent['userInfo']).toEqual({
+            email: 'ana@example.com',
+            displayName: 'ana@example.com',
+        });
+        expect(sent['blockchain']).toBe('stellar');
+    });
+
+    const existing = '123e4567-e89b-12d3-a456-426614174000';
+    const seeOrg = (onRetry: (body: Record<string, unknown>) => void): Route => {
+        let calls = 0;
+        return {
+            method: 'POST',
+            path: '/ramp/onboarding-url',
+            respond: (req) => {
+                calls += 1;
+                if (calls === 1) {
+                    return {
+                        status: 409,
+                        body: `You have already added user with this address, see org: ${existing}`,
+                    };
+                }
+                onRetry(req as Record<string, unknown>);
+                return { status: 200, body: { presigned_url: 'https://fresh.url' } };
+            },
+        };
+    };
+
+    it('recovers the existing customer from the documented "see org" 409 and retries', async () => {
+        let retryBody: Record<string, unknown> = {};
+        const result = await sandboxClient([
+            seeOrg((body) => (retryBody = body)),
+        ]).createHostedOnboarding({ email: 'ana@example.com', publicKey: 'GANA' });
+        expect(result.recovered).toBe(true);
+        expect(result.customerId).toBe(existing);
+        expect(result.presignedUrl).toBe('https://fresh.url');
+        // The retry reused the EXISTING customer id.
+        expect(retryBody['customerId']).toBe(existing);
+    });
+
+    it('reuses the FIRST existing bank account on recovery when asked to', async () => {
+        let retryBody: Record<string, unknown> = {};
+        const accounts: Route = {
+            method: 'POST',
+            path: `/ramp/customer/${existing}/bank-accounts`,
+            respond: {
+                status: 200,
+                body: {
+                    items: [
+                        {
+                            bankAccountId: 'b-first',
+                            createdAt: '2026-01-01T00:00:00Z',
+                            abbrClabe: '****1234',
+                            status: 'active',
+                        },
+                        {
+                            bankAccountId: 'b-second',
+                            createdAt: '2026-02-01T00:00:00Z',
+                            abbrClabe: '****5678',
+                            status: 'active',
+                        },
+                    ],
+                },
+            },
+        };
+        const result = await sandboxClient([
+            seeOrg((body) => (retryBody = body)),
+            accounts,
+        ]).createHostedOnboarding({
+            email: 'ana@example.com',
+            publicKey: 'GANA',
+            reuseExistingBankAccount: true,
+        });
+        expect(result.recovered).toBe(true);
+        expect(result.bankAccountId).toBe('b-first');
+        expect(retryBody['bankAccountId']).toBe('b-first');
+    });
+
+    it('falls back to a fresh id when the recovered customer has no accounts', async () => {
+        let retryBody: Record<string, unknown> = {};
+        const accounts: Route = {
+            method: 'POST',
+            path: `/ramp/customer/${existing}/bank-accounts`,
+            respond: { status: 200, body: { items: [] } },
+        };
+        const result = await sandboxClient([
+            seeOrg((body) => (retryBody = body)),
+            accounts,
+        ]).createHostedOnboarding({
+            email: 'ana@example.com',
+            publicKey: 'GANA',
+            reuseExistingBankAccount: true,
+        });
+        expect(result.bankAccountId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(retryBody['bankAccountId']).toBe(result.bankAccountId);
+    });
+
+    it('keeps minting a fresh id by default (no reuse without opting in)', async () => {
+        const accounts: Route = {
+            method: 'POST',
+            path: `/ramp/customer/${existing}/bank-accounts`,
+            respond: { status: 200, body: { items: [{ bankAccountId: 'b-first' }] } },
+        };
+        const result = await sandboxClient([seeOrg(() => {}), accounts]).createHostedOnboarding({
+            email: 'ana@example.com',
+            publicKey: 'GANA',
+        });
+        expect(result.bankAccountId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(accounts.calls ?? []).toHaveLength(0);
+    });
+});
+
+describe('sandboxApproveKyc', () => {
+    it('submits identity then accepts the 3 agreements, each with a FRESH presigned URL', async () => {
+        let presignedCount = 0;
+        const kycRoute: Route = {
+            method: 'POST',
+            path: '/ramp/customer/c-1/kyc',
+            respond: { status: 200, body: { status: 'approved' } },
+        };
+        const onboardingRoute: Route = {
+            method: 'POST',
+            path: '/ramp/onboarding-url',
+            respond: () => {
+                presignedCount += 1;
+                return { status: 200, body: { presigned_url: `https://p/${presignedCount}` } };
+            },
+        };
+        const agreements: Route = {
+            method: 'POST',
+            path: (p) => p.startsWith('/ramp/agreements/'),
+            respond: { status: 200, body: { success: true } },
+        };
+        const client = sandboxClient([kycRoute, onboardingRoute, agreements]);
+
+        const result = await client.sandboxApproveKyc({ customerId: 'c-1', publicKey: 'GANA' });
+
+        // The submit response is authoritative — an immediate GET can lag.
+        expect(result).toEqual({ submitted: true, status: 'approved' });
+        expect(kycRoute.calls).toHaveLength(1);
+        expect(
+            (kycRoute.calls![0]!.body as Record<string, unknown>)['pubkey'],
+        ).toBe('GANA');
+        expect(presignedCount).toBe(3); // one fresh URL per agreement
+        expect(agreements.calls!.map((call) => call.path)).toEqual([
+            '/ramp/agreements/electronic-signature',
+            '/ramp/agreements/terms-and-conditions',
+            '/ramp/agreements/customer-agreement',
+        ]);
+        // Each agreement got ITS OWN fresh presigned URL.
+        expect(
+            agreements.calls!.map(
+                (call) => (call.body as Record<string, unknown>)['presignedUrl'],
+            ),
+        ).toEqual(['https://p/1', 'https://p/2', 'https://p/3']);
+    });
+
+    it('still accepts the 3 agreements when /kyc rejects (already-approved retry)', async () => {
+        const kycRoute: Route = {
+            method: 'POST',
+            path: '/ramp/customer/c-1/kyc',
+            respond: { status: 400, body: { error: 'Customer already approved' } },
+        };
+        const onboardingRoute: Route = {
+            method: 'POST',
+            path: '/ramp/onboarding-url',
+            respond: { status: 200, body: { presigned_url: 'https://p/x' } },
+        };
+        const agreements: Route = {
+            method: 'POST',
+            path: (p) => p.startsWith('/ramp/agreements/'),
+            respond: { status: 200, body: { success: true } },
+        };
+        const client = sandboxClient([kycRoute, onboardingRoute, agreements]);
+
+        const result = await client.sandboxApproveKyc({ customerId: 'c-1', publicKey: 'GANA' });
+
+        expect(result).toEqual({ submitted: false, status: null });
+        expect(agreements.calls).toHaveLength(3);
+    });
+
+    it('still throws on non-API failures (network)', async () => {
+        const client = new EtherfuseClient({
+            apiKey: 'api_sand_t',
+            fetch: (() =>
+                Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch,
+        });
+        await expect(
+            client.sandboxApproveKyc({ customerId: 'c-1', publicKey: 'GANA' }),
+        ).rejects.toBeInstanceOf(TypeError);
+    });
+
+    it('refuses to run outside sandbox', async () => {
+        const client = new EtherfuseClient({ apiKey: 'api_prod_t', fetch: mockFetch([]) });
+        await expect(
+            client.sandboxApproveKyc({ customerId: 'c', publicKey: 'G' }),
+        ).rejects.toBeInstanceOf(RampkitError);
     });
 });

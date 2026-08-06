@@ -93,7 +93,26 @@ unit tests). The changes below are landed unless marked otherwise.
   `@deprecated`, sunset 2026-08-16.
 - `sandboxApproveKyc()` (v0.4, sandbox-only): browserless KYC approval for
   tests — programmatic identity submission plus the three agreement
-  acceptances, each with a fresh presigned URL (they are single-use).
+  acceptances, each with a fresh presigned URL (they are single-use). Since
+  v0.5 the identity submit is best-effort (an already-approved customer no
+  longer aborts the agreement acceptances) and the function returns the
+  status straight from the submit response — the wallet-scoped GET can lag
+  behind the approval.
+- `customer.create` handler operation (v0.5): signup no longer needs a
+  custom route. A new `signup` scope lets an authenticated app user without
+  an Etherfuse identity yet create their customer; every other non-public
+  operation now explicitly 401s identity-less sessions. The handler's
+  `onCustomerCreated` hook is where the app persists the new `customerId`.
+- Onramp quotes omit `walletAddress` when the wallet is empty (v0.5) —
+  upstream (and 0.4) sent an empty string the API could reject or silently
+  ignore.
+- `createHostedOnboarding({ reuseExistingBankAccount })` (v0.5): the
+  "see org" recovery can reuse the recovered customer's first registered
+  bank account — parity with upstream's behavior — instead of minting a new
+  `bankAccountId` per recovery.
+- `npx @spacecathy/rampkit keygen` (v0.5): generates the RSA keypair for
+  the JWT/`/idv` launch, writes the private key to a file (refusing to
+  overwrite), and prints the JWKS plus the Etherfuse registration checklist.
 - Quote `exchangeRate` falls back to the derived fiat-per-token rate when
   the sandbox omits it (v0.4).
 - Not carried over (out of scope): webhook payload type (upstream's flat

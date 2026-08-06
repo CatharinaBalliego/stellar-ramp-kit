@@ -333,3 +333,145 @@ describe('listAssets', () => {
         );
     });
 });
+
+describe('deposit instructions mapping (SPEI and PIX)', () => {
+    it('maps PIX wire fields to a pix-rail deposit', async () => {
+        const client = makeClient([
+            {
+                method: 'GET',
+                path: '/ramp/order/o-br',
+                respond: {
+                    status: 200,
+                    body: {
+                        ...WIRE_ORDER,
+                        orderId: 'o-br',
+                        depositClabe: null,
+                        depositBankName: null,
+                        depositAccountHolder: 'Etherfuse BR',
+                        depositPixCode: '00020126BR...',
+                        depositPixKey: 'chave@etherfuse.com',
+                        depositPixKeyType: 'email',
+                        amountInFiat: 250.5,
+                    },
+                },
+            },
+        ]);
+        const order = await client.getOrder('o-br');
+        expect(order.deposit).toEqual({
+            rail: 'pix',
+            pixCode: '00020126BR...',
+            pixKey: 'chave@etherfuse.com',
+            pixKeyType: 'email',
+            beneficiary: 'Etherfuse BR',
+            amount: '250.5',
+        });
+    });
+
+    it('still prefers SPEI when a CLABE is present', async () => {
+        const client = makeClient([
+            { method: 'GET', path: '/ramp/order/o-1', respond: { status: 200, body: WIRE_ORDER } },
+        ]);
+        const order = await client.getOrder('o-1');
+        expect(order.deposit?.rail).toBe('spei');
+    });
+});
+
+describe('quote exchangeRate fallback when the sandbox omits it', () => {
+    const quoteRoute = (body: Record<string, unknown>): Route => ({
+        method: 'POST',
+        path: '/ramp/quote',
+        respond: (req) => ({
+            status: 200,
+            body: {
+                quoteId: 'q-1',
+                quoteAssets: (req as Record<string, unknown>)['quoteAssets'],
+                createdAt: '2026-08-06T12:00:00Z',
+                expiresAt: '2026-08-06T12:02:00Z',
+                feeBps: null,
+                feeAmount: null,
+                destinationAmountAfterFee: null,
+                ...body,
+            },
+        }),
+    });
+
+    it('derives fiat-per-token for onramp (source=fiat)', async () => {
+        const client = makeClient([
+            quoteRoute({ sourceAmount: '500', destinationAmount: '49.75', exchangeRate: '' }),
+        ]);
+        const quote = await client.createQuote({
+            customerId: 'c-1',
+            publicKey: 'G1',
+            direction: 'onramp',
+            asset: 'CETES:GX',
+            fiat: 'MXN',
+            amount: '500',
+        });
+        expect(Number(quote.exchangeRate)).toBeCloseTo(500 / 49.75, 10);
+    });
+
+    it('derives fiat-per-token for offramp (destination=fiat)', async () => {
+        const client = makeClient([
+            quoteRoute({ sourceAmount: '5', destinationAmount: '50.25', exchangeRate: null }),
+        ]);
+        const quote = await client.createQuote({
+            customerId: 'c-1',
+            publicKey: 'G1',
+            direction: 'offramp',
+            asset: 'CETES:GX',
+            fiat: 'MXN',
+            amount: '5',
+        });
+        expect(Number(quote.exchangeRate)).toBeCloseTo(50.25 / 5, 10);
+    });
+
+    it('keeps the wire value when present', async () => {
+        const client = makeClient([
+            quoteRoute({ sourceAmount: '500', destinationAmount: '49.75', exchangeRate: '10.05' }),
+        ]);
+        const quote = await client.createQuote({
+            customerId: 'c-1',
+            publicKey: 'G1',
+            direction: 'onramp',
+            asset: 'CETES:GX',
+            fiat: 'MXN',
+            amount: '500',
+        });
+        expect(quote.exchangeRate).toBe('10.05');
+    });
+
+    it('omits walletAddress on onramp when publicKey is empty', async () => {
+        const route = quoteRoute({
+            sourceAmount: '500',
+            destinationAmount: '49.75',
+            exchangeRate: '10.05',
+        });
+        await makeClient([route]).createQuote({
+            customerId: 'c-1',
+            publicKey: '',
+            direction: 'onramp',
+            asset: 'CETES:GX',
+            fiat: 'MXN',
+            amount: '500',
+        });
+        const sent = route.calls![0]!.body as Record<string, unknown>;
+        expect('walletAddress' in sent).toBe(false);
+    });
+
+    it('still sends walletAddress on onramp when present', async () => {
+        const route = quoteRoute({
+            sourceAmount: '500',
+            destinationAmount: '49.75',
+            exchangeRate: '10.05',
+        });
+        await makeClient([route]).createQuote({
+            customerId: 'c-1',
+            publicKey: 'GANA',
+            direction: 'onramp',
+            asset: 'CETES:GX',
+            fiat: 'MXN',
+            amount: '500',
+        });
+        expect((route.calls![0]!.body as Record<string, unknown>)['walletAddress']).toBe('GANA');
+    });
+});

@@ -11,9 +11,10 @@
  * dev-only bootstrap until then; the runtime library never touches it.
  */
 
-import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { existsSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
+import { createJwks } from './server/onboarding';
 import { generateStellarKeypair } from './cli/strkey';
 
 const SANDBOX = 'https://api.sand.etherfuse.com';
@@ -24,13 +25,17 @@ const USAGE = `rampkit — Etherfuse ramp kit for Stellar (community package)
 
 Usage:
   npx @spacecathy/rampkit setup-sandbox <email> [--key api_sand_...] [--write <file>]
+  npx @spacecathy/rampkit keygen [--out <private.pem>] [--kid <key-id>]
 
-Creates a sandbox customer + funded testnet wallet and walks you through the
-hosted KYC once, then prints (or --write's) the env values a rampkit app
-needs. <email> is the address the customer confirms during verification.
+setup-sandbox: creates a sandbox customer + funded testnet wallet and walks
+you through the hosted KYC once, then prints (or --write's) the env values a
+rampkit app needs. <email> is the address the customer confirms during
+verification. The API key comes from --key or the ETHERFUSE_API_KEY env var.
+Get one free: https://sandbox.etherfuse.com (create account → Approve KYB →
+API key).
 
-The API key comes from --key or the ETHERFUSE_API_KEY env var. Get one free:
-https://sandbox.etherfuse.com (create account → Approve KYB → API key).
+keygen: generates the RSA keypair for the in-app KYC launch (/idv), writes
+the private key to a file, and prints the JWKS + the registration checklist.
 `;
 
 const log = (...a: unknown[]) => console.log('•', ...a);
@@ -162,11 +167,64 @@ claim) — isso também cria a trustline. Docs: https://www.npmjs.com/package/@s
 `);
 }
 
+/**
+ * One-time platform setup for the in-app KYC launch: RSA keypair + JWKS.
+ * The private key goes to a FILE (never stdout — terminals get logged);
+ * the JWKS is public by design and is printed for hosting/registration.
+ */
+function keygen(args: string[]): void {
+    const outFlag = args.indexOf('--out');
+    const kidFlag = args.indexOf('--kid');
+    const outPath = (outFlag >= 0 ? args[outFlag + 1] : undefined) ?? 'rampkit-private.pem';
+    const keyId = (kidFlag >= 0 ? args[kidFlag + 1] : undefined) ?? `rampkit-${randomUUID().slice(0, 8)}`;
+
+    if (existsSync(outPath)) {
+        fail(`${outPath} já existe — não vou sobrescrever uma chave privada. Use --out <outro-arquivo>.`);
+    }
+
+    log('Gerando chave RSA 2048…');
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
+    writeFileSync(outPath, pem, { mode: 0o600 });
+    log(`Chave privada gravada em ${outPath} (NUNCA commite este arquivo)`);
+
+    const jwks = createJwks({ privateKey: pem, keyId });
+
+    console.log(`
+JWKS (público — é isso que a Etherfuse busca para verificar seus JWTs):
+
+${JSON.stringify(jwks, null, 2)}
+
+================================================================================
+CHECKLIST — registro do /idv (uma vez por ambiente):
+
+1. Guarde ${outPath} como segredo do servidor (env/secret manager; fora do git).
+2. Sirva o JWKS acima numa URL HTTPS estável — no seu app:
+     import { createJwksHandler } from '@spacecathy/rampkit/server';
+     // ex.: app/.well-known/jwks.json/route.ts
+     export const GET = createJwksHandler({ privateKey, keyId: '${keyId}' });
+3. Envie ao seu contato na Etherfuse: seu ISSUER (ex.: https://seuapp.com)
+   e a URL do JWKS. O registro ainda não é self-serve do lado deles.
+4. Configure o client:
+     new EtherfuseClient({ apiKey, onboarding: {
+         issuer: '<seu issuer>', privateKey, keyId: '${keyId}' } })
+
+Depois disso, kyc.startSession / useKyc().launch funcionam para todo usuário.
+================================================================================
+`);
+}
+
 const [, , command, ...rest] = process.argv;
 if (command === 'setup-sandbox') {
     setupSandbox(rest).catch((error: unknown) => {
         fail(error instanceof Error ? error.message : String(error));
     });
+} else if (command === 'keygen') {
+    try {
+        keygen(rest);
+    } catch (error) {
+        fail(error instanceof Error ? error.message : String(error));
+    }
 } else {
     console.log(USAGE);
     process.exit(command === undefined || command === '--help' ? 0 : 1);

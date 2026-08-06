@@ -6,6 +6,7 @@
 
 import { RampkitError } from '../core/errors';
 import type {
+    CreatedCustomer,
     CustomerKyc,
     KycLaunch,
     WalletKyc,
@@ -61,6 +62,17 @@ export interface RampClient {
         amount: string;
     }): Promise<RampQuote>;
     listBankAccounts(): Promise<RampBankAccount[]>;
+    /**
+     * Create the session user's Etherfuse customer (signup). Identity comes
+     * from the server session; params only fill gaps the session doesn't
+     * carry. Your server should persist the returned `customerId` via the
+     * handler's `onCustomerCreated` hook.
+     */
+    createCustomer(args?: {
+        email?: string;
+        name?: string;
+        publicKey?: string;
+    }): Promise<CreatedCustomer>;
     getKycStatus(args?: { requirements?: boolean }): Promise<CustomerKyc>;
     /** Wallet-scoped status — different enum (proposed/approved_chain_deploying/rejected). */
     getWalletKycStatus(): Promise<WalletKyc>;
@@ -137,6 +149,7 @@ export function createRampClient(options: CreateRampClientOptions = {}): RampCli
         listAssets: (args) => call('assets.list', 'GET', args),
         createQuote: (args) => call('quote.create', 'POST', args),
         listBankAccounts: () => call('bankAccounts.list', 'GET'),
+        createCustomer: (args = {}) => call('customer.create', 'POST', args),
         getKycStatus: (args = {}) =>
             call('kyc.status', 'GET', args.requirements ? { requirements: 'true' } : {}),
         getWalletKycStatus: () => call('kyc.status', 'GET', { wallet: 'true' }),

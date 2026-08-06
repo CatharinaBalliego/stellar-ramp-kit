@@ -4,7 +4,7 @@ import {
     HorizonError,
     OfframpPreflightError,
 } from '../core/errors';
-import type { RampErrorEnvelope, RampOperation } from '../core/types';
+import type { CreatedCustomer, RampErrorEnvelope, RampOperation } from '../core/types';
 import type { EtherfuseClient } from './client';
 import {
     BadParamsError,
@@ -40,6 +40,18 @@ export interface CreateRampHandlerOptions {
     getSession: GetSession;
     /** Restrict which operations this route exposes. Default: all. */
     operations?: readonly RampOperation[];
+    /**
+     * Called after `customer.create` succeeds, BEFORE the response is sent —
+     * persist `customer.customerId` on your user record here, so the browser
+     * response is never the only copy. Throwing fails the request (the
+     * Etherfuse customer already exists at that point; `createCustomer` is
+     * idempotent per id, so the retry path is safe).
+     */
+    onCustomerCreated?: (args: {
+        request: Request;
+        session: RampSession;
+        customer: CreatedCustomer;
+    }) => void | Promise<void>;
 }
 
 const json = (status: number, body: unknown): Response =>
@@ -118,10 +130,26 @@ export function createRampHandler(
             if (!session) {
                 return failure(401, { kind: 'unauthorized', message: 'No session' });
             }
+            // `signup` runs before the Etherfuse identity exists; everything
+            // else needs the full identity.
+            if (spec.scope !== 'signup' && (!session.customerId || !session.publicKey)) {
+                return failure(401, {
+                    kind: 'unauthorized',
+                    message:
+                        'Session has no Etherfuse identity — create the customer first (customer.create)',
+                });
+            }
         }
 
         try {
             const result = await spec.execute(client, session, params);
+            if (op === 'customer.create' && options.onCustomerCreated) {
+                await options.onCustomerCreated({
+                    request,
+                    session: session!,
+                    customer: result as CreatedCustomer,
+                });
+            }
             return json(200, result);
         } catch (error) {
             return mapError(error);

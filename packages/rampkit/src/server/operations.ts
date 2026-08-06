@@ -2,13 +2,20 @@ import { RampkitError } from '../core/errors';
 import type { RampOperation } from '../core/types';
 import type { EtherfuseClient } from './client';
 
-/** Caller identity, resolved by the consumer's `getSession`. */
+/**
+ * Caller identity, resolved by the consumer's `getSession`.
+ *
+ * `customerId`/`publicKey` are optional ONLY for the signup window — an
+ * authenticated app user who has no Etherfuse customer yet can still call
+ * `customer.create`. Every other non-public operation requires both (the
+ * handler enforces it with a 401).
+ */
 export interface RampSession {
-    customerId: string;
-    publicKey: string;
-    /** Used for KYC launches (`kyc.startSession`) when present. */
+    customerId?: string;
+    publicKey?: string;
+    /** Used for customer creation and KYC launches when present. */
     email?: string;
-    /** Display name for KYC launches. */
+    /** Display name for customer creation and KYC launches. */
     name?: string;
 }
 
@@ -26,12 +33,16 @@ export interface OperationSpec {
     method: 'GET' | 'POST';
     /**
      * - `public`: no session required; no identity used.
-     * - `customer`: session required. `customerId`/`publicKey` ALWAYS come
-     *   from the session — anything the browser sends is ignored.
-     * - `order`: session required; the fetched order must belong to the
+     * - `signup`: session required (the app authenticated the user), but the
+     *   Etherfuse identity may not exist yet — this is how `customer.create`
+     *   runs BEFORE there is a `customerId`.
+     * - `customer`: session with full identity required. `customerId` /
+     *   `publicKey` ALWAYS come from the session — anything the browser
+     *   sends is ignored.
+     * - `order`: like `customer`, and the fetched order must belong to the
      *   session's customer or the operation reports not-found.
      */
-    scope: 'public' | 'customer' | 'order';
+    scope: 'public' | 'signup' | 'customer' | 'order';
     /** Hidden (404) when the client runs against production. */
     sandboxOnly?: boolean;
     execute: (
@@ -56,6 +67,19 @@ const optional = (params: Record<string, unknown>, key: string): string | undefi
     return value;
 };
 
+/**
+ * Narrows a session to its full Etherfuse identity. The handler already
+ * gates `customer`/`order` scopes on this, so ops can rely on it.
+ */
+const identity = (session: RampSession | null): { customerId: string; publicKey: string } => {
+    if (!session?.customerId || !session.publicKey) {
+        throw new BadParamsError(
+            'Session has no Etherfuse identity — create the customer first (customer.create)',
+        );
+    }
+    return { customerId: session.customerId, publicKey: session.publicKey };
+};
+
 async function requireOwnedOrder(
     client: EtherfuseClient,
     session: RampSession,
@@ -63,7 +87,7 @@ async function requireOwnedOrder(
 ) {
     const order = await client.getOrder(orderId);
     // Cross-customer reads report not-found — never leak existence.
-    if (order.customerId !== session.customerId) throw new NotOwnedError();
+    if (order.customerId !== identity(session).customerId) throw new NotOwnedError();
     return order;
 }
 
@@ -79,13 +103,35 @@ export const RAMP_OPERATIONS = {
         execute: async (client) => client.getPublicConfig(),
     },
 
+    'customer.create': {
+        method: 'POST',
+        scope: 'signup',
+        execute: async (client, session, params) => {
+            // The browser can never choose the customerId — it comes from the
+            // session (idempotent retry) or is generated server-side. Email
+            // and wallet come from the session first; params fill the gaps.
+            const email = session!.email ?? optional(params, 'email');
+            if (!email) {
+                throw new BadParamsError(
+                    'customer.create needs the user email (via session or params)',
+                );
+            }
+            return client.createCustomer({
+                email,
+                displayName: session!.name ?? optional(params, 'name'),
+                customerId: session!.customerId,
+                publicKey: session!.publicKey ?? optional(params, 'publicKey'),
+            });
+        },
+    },
+
     'assets.list': {
         method: 'GET',
         scope: 'customer',
         execute: async (client, session, params) =>
             client.listAssets({
                 currency: need(params, 'currency'),
-                wallet: session!.publicKey,
+                wallet: identity(session).publicKey,
             }),
     },
 
@@ -98,8 +144,7 @@ export const RAMP_OPERATIONS = {
                 throw new BadParamsError('direction must be "onramp" or "offramp"');
             }
             return client.createQuote({
-                customerId: session!.customerId,
-                publicKey: session!.publicKey,
+                ...identity(session),
                 direction,
                 asset: need(params, 'asset'),
                 fiat: need(params, 'fiat'),
@@ -111,18 +156,20 @@ export const RAMP_OPERATIONS = {
     'bankAccounts.list': {
         method: 'GET',
         scope: 'customer',
-        execute: async (client, session) => client.listBankAccounts(session!.customerId),
+        execute: async (client, session) => client.listBankAccounts(identity(session).customerId),
     },
 
     'kyc.status': {
         method: 'GET',
         scope: 'customer',
-        execute: async (client, session, params) =>
-            params['wallet'] === 'true'
-                ? client.getWalletKyc(session!.customerId, session!.publicKey)
-                : client.getCustomerKyc(session!.customerId, {
+        execute: async (client, session, params) => {
+            const id = identity(session);
+            return params['wallet'] === 'true'
+                ? client.getWalletKyc(id.customerId, id.publicKey)
+                : client.getCustomerKyc(id.customerId, {
                       requirements: params['requirements'] === 'true',
-                  }),
+                  });
+        },
     },
 
     'kyc.startSession': {
@@ -139,7 +186,7 @@ export const RAMP_OPERATIONS = {
                 );
             }
             return client.createKycLaunch({
-                customerId: session!.customerId,
+                customerId: identity(session).customerId,
                 email,
                 name: name!,
                 returnUrl: optional(params, 'returnUrl'),
@@ -153,8 +200,7 @@ export const RAMP_OPERATIONS = {
         scope: 'customer',
         execute: async (client, session, params) =>
             client.createOnrampOrder({
-                customerId: session!.customerId,
-                publicKey: session!.publicKey,
+                ...identity(session),
                 quoteId: need(params, 'quoteId'),
                 bankAccountId: need(params, 'bankAccountId'),
                 memo: optional(params, 'memo'),
@@ -172,8 +218,7 @@ export const RAMP_OPERATIONS = {
             }
             const q = quote as Record<string, unknown>;
             return client.createOfframpOrder({
-                customerId: session!.customerId,
-                publicKey: session!.publicKey,
+                ...identity(session),
                 quote: {
                     id: need(q, 'id'),
                     sourceAsset: need(q, 'sourceAsset'),
@@ -191,7 +236,7 @@ export const RAMP_OPERATIONS = {
         scope: 'customer',
         execute: async (client, session, params) =>
             client.preflightOfframp({
-                publicKey: session!.publicKey,
+                publicKey: identity(session).publicKey,
                 sourceAsset: need(params, 'sourceAsset'),
                 sourceAmount: need(params, 'sourceAmount'),
             }),

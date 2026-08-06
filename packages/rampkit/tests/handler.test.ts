@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { EtherfuseClient } from '../src/server/client';
 import { createRampHandler, unsafeTrustClient } from '../src/server/handler';
-import type { RampErrorEnvelope } from '../src/core/types';
+import type { CreatedCustomer, RampErrorEnvelope } from '../src/core/types';
 import { mockFetch, WIRE_ORDER, type Route } from './helpers';
 
 const SESSION = { customerId: 'c-1', publicKey: 'GWALLET' };
@@ -160,5 +160,83 @@ describe('unsafeTrustClient', () => {
             get('bankAccounts.list', '?customerId=c-proto&publicKey=GPROTO'),
         );
         expect(res.status).toBe(200);
+    });
+});
+
+describe('customer.create (signup scope)', () => {
+    const orgRoute = (): Route => ({
+        method: 'POST',
+        path: '/ramp/organization',
+        respond: { status: 200, body: {} },
+    });
+    const walletRoute = (): Route => ({
+        method: 'POST',
+        path: (p) => /^\/ramp\/customer\/[^/]+\/wallet$/.test(p),
+        respond: { status: 200, body: {} },
+    });
+    const signupHandler = (
+        routes: Route[],
+        session: Record<string, unknown>,
+        onCustomerCreated?: (args: { customer: CreatedCustomer }) => void,
+    ) =>
+        createRampHandler({
+            client: new EtherfuseClient({ apiKey: 'api_sand_t', fetch: mockFetch(routes) }),
+            getSession: () => session,
+            onCustomerCreated,
+        });
+
+    it('creates the customer for a session that has NO Etherfuse identity yet', async () => {
+        const org = orgRoute();
+        const wallet = walletRoute();
+        let persisted: CreatedCustomer | undefined;
+        const handler = signupHandler(
+            [org, wallet],
+            // Signup window: the app authenticated the user, but there is no
+            // customerId/publicKey yet.
+            { email: 'ana@example.com', name: 'Ana' },
+            ({ customer }) => {
+                persisted = customer;
+            },
+        );
+
+        const res = await handler(post('customer.create', { publicKey: 'GANA' }));
+        expect(res.status).toBe(200);
+        const created = (await res.json()) as CreatedCustomer;
+        expect(created.customerId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(created.publicKey).toBe('GANA');
+        // The persistence hook saw the same customer the browser got.
+        expect(persisted).toEqual(created);
+        const sentOrg = org.calls![0]!.body as Record<string, unknown>;
+        expect(sentOrg['userInfo']).toEqual({
+            email: 'ana@example.com',
+            displayName: 'Ana',
+        });
+        expect((wallet.calls![0]!.body as Record<string, unknown>)['publicKey']).toBe('GANA');
+    });
+
+    it('reuses the session customerId on retries (idempotent) and ignores browser ids', async () => {
+        const org = orgRoute();
+        const handler = signupHandler([org], {
+            customerId: 'c-persisted',
+            email: 'ana@example.com',
+        });
+        const res = await handler(post('customer.create', { customerId: 'c-EVIL' }));
+        expect(res.status).toBe(200);
+        expect((org.calls![0]!.body as Record<string, unknown>)['id']).toBe('c-persisted');
+    });
+
+    it('401s identity-less sessions on customer-scoped ops with a pointer to customer.create', async () => {
+        const handler = signupHandler([], { email: 'ana@example.com' });
+        const res = await handler(get('bankAccounts.list'));
+        expect(res.status).toBe(401);
+        const err = await envelope(res);
+        expect(err.kind).toBe('unauthorized');
+        expect(err.message).toContain('customer.create');
+    });
+
+    it('still 401s customer.create with no session at all', async () => {
+        const handler = makeHandler([], { session: null });
+        const res = await handler(post('customer.create', { email: 'x@y.z' }));
+        expect(res.status).toBe(401);
     });
 });
