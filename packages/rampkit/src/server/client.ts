@@ -8,6 +8,10 @@
  * the wallet against Horizon, and no field is ever fabricated.
  */
 
+// Explicit import — the `crypto` GLOBAL only exists on Node 19+, and this
+// package supports Node >=18.17. This module is node-conditioned, so the
+// node: import is safe.
+import { randomUUID } from 'node:crypto';
 import { NETWORKS } from '../core/constants';
 import {
     DuplicatePendingOrderError,
@@ -269,7 +273,7 @@ export class EtherfuseClient {
             args.direction === 'onramp' ? [args.fiat, identifier] : [identifier, args.fiat];
 
         const { data } = await this.request<WireQuoteResponse>('POST', '/ramp/quote', {
-            quoteId: crypto.randomUUID(),
+            quoteId: randomUUID(),
             customerId: args.customerId,
             blockchain: 'stellar',
             quoteAssets: { type: args.direction, sourceAsset, targetAsset },
@@ -345,7 +349,7 @@ export class EtherfuseClient {
         /** Persist and reuse across retries; defaults to a fresh UUID. */
         orderId?: string;
     }): Promise<RampOrder> {
-        const orderId = args.orderId ?? crypto.randomUUID();
+        const orderId = args.orderId ?? randomUUID();
         try {
             const { data } = await this.request<{
                 onramp: {
@@ -417,7 +421,7 @@ export class EtherfuseClient {
             throw new OfframpPreflightError(preflight.issues);
         }
 
-        const orderId = args.orderId ?? crypto.randomUUID();
+        const orderId = args.orderId ?? randomUUID();
         try {
             const { data } = await this.request<{ offramp: { orderId: string } }>(
                 'POST',
